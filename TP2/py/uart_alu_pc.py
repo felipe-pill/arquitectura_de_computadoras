@@ -1,7 +1,7 @@
 # pip install pyserial
 import serial, time
 
-PORT = "COM3"   # <-- set your UART COM port
+PORT = "COM5"   # <-- set your UART COM port
 BAUD = 115200
 
 HDR_IN  = bytes([0xAA])
