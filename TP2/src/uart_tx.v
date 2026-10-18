@@ -9,8 +9,8 @@ module uart_tx #(
   input  wire tick16,         // 16x tick from baudgen
   input  wire start,          // strobe: load and start transmission
   input  wire [DATA_BITS-1:0] data,
-  output reg  tx,             // serial line (idle high)
-  output reg  busy            // 1 while shifting frame
+  output reg  tx   = 1'b1,    // serial line (idle high)
+  output reg  busy = 1'b0     // 1 while shifting frame
 );
   // We step the FSM once per "bit period". Make a /16 sub-counter.
   reg [3:0] sub = 4'd0;       // 0..15
@@ -22,7 +22,7 @@ module uart_tx #(
   reg [DATA_BITS-1:0] shreg = {DATA_BITS{1'b0}};
   reg [$clog2(DATA_BITS):0] bitcnt = 0;
 
-  always @(posedge clk or posedge rst) begin
+  always @(posedge clk) begin
     if (rst) begin
       tx     <= 1'b1;   // idle high
       busy   <= 1'b0;

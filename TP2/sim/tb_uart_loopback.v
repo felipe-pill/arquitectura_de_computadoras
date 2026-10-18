@@ -53,6 +53,7 @@ module tb_uart_loopback;
   // ----- Byte Vector -----
   reg [7:0] vec [0:5];
   integer i;
+  integer errors = 0;
 
   // ----- Send one byte (stretched start until tx_busy=1) -----
   task send_byte(input [7:0] b);
@@ -80,26 +81,22 @@ module tb_uart_loopback;
     begin
       timeout = 0;
       // Wait for rx_valid (simple guard)
-      while (!rx_valid) begin
+      while (!rx_valid && timeout <= 100000) begin
         @(posedge clk);
         timeout = timeout + 1;
-        if (timeout > 100000) begin
-          $display("** TIMEOUT waiting for byte 0x%02h **", b);
-          $fatal;
-        end
       end
 
-      if (rx_ferr) begin
-        $display("** FRAMING ERROR receiving 0x%02h **", b);
-        $fatal;
-      end
-
-      if (rx_data !== b) begin
-        $display("** MISMATCH sent=0x%02h received=0x%02h **", b, rx_data);
-        $fatal;
-      end
-
-      $display("[%0t ns] PASS - byte 0x%02h OK", $time, b);
+      if (!rx_valid) begin
+        $display("[%0t] FAIL: timeout, sent=0x%02h nothing received  TEST FAILED", $time, b);
+        errors = errors + 1;
+      end else if (rx_ferr) begin
+        $display("[%0t] FAIL: framing error, sent=0x%02h received=0x%02h  TEST FAILED", $time, b, rx_data);
+        errors = errors + 1;
+      end else if (rx_data !== b) begin
+        $display("[%0t] FAIL: sent=0x%02h expected=0x%02h received=0x%02h  TEST FAILED", $time, b, b, rx_data);
+        errors = errors + 1;
+      end else
+        $display("[%0t] PASS: sent=0x%02h expected=0x%02h received=0x%02h", $time, b, b, rx_data);
     end
   endtask
 
@@ -109,6 +106,7 @@ module tb_uart_loopback;
     $dumpfile("uart_loopback.vcd");
     $dumpvars(0, tb_uart_loopback);
 
+    $timeformat(-9, 0, " ns", 0);
     $display("\n=== UART LOOPBACK TEST START ===");
 
     // Load bytes
@@ -133,8 +131,11 @@ module tb_uart_loopback;
       repeat (4) @(posedge clk);
     end
 
-    $display("=== ALL BYTES RECEIVED CORRECTLY ✅ ===\n");
     #200;
+    if (errors == 0)
+      $display("ALL TESTS PASSED");
+    else
+      $fatal(1, "%0d byte(s) failed", errors);
     $finish;
   end
 

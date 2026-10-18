@@ -26,7 +26,7 @@ module uart_rx #(
     rx_q2 <= rx_q1;
   end
 
-  always @(posedge clk or posedge rst) begin
+  always @(posedge clk) begin
     if (rst) begin
       state         <= S_IDLE;
       sub           <= 4'd0;

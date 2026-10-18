@@ -18,7 +18,7 @@ module uart_baudgen #(
   localparam integer CNT_W = (DIV <= 1) ? 1 : $clog2(DIV);
   reg [CNT_W-1:0] cnt = {CNT_W{1'b0}};
 
-  always @(posedge clk or posedge rst) begin
+  always @(posedge clk) begin
     if (rst) begin
       cnt    <= 0;
       tick16 <= 1'b0;

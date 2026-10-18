@@ -1,3 +1,8 @@
+`timescale 1ns/1ps
+`default_nettype none
+
+// Sincronizador + detector de flanco. NO filtra rebotes: un botón que rebota
+// puede generar varios pulsos.
 module btn_onepulse (
     input  wire clk,   // reloj del sistema
     input  wire btn,   // señal del botón (asíncrona)
@@ -23,3 +28,5 @@ module btn_onepulse (
     assign pulse = sync[0] & ~sync[1];
 
 endmodule
+
+`default_nettype wire

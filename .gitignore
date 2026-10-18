@@ -1,0 +1,21 @@
+# command-line sim output
+build/
+xsim.dir/
+*.wdb
+*.pb
+webtalk*
+
+# Vivado generated
+.Xil/
+*.cache/
+*.runs/
+*.sim/
+*.hw/
+*.ip_user_files/
+*.gen/
+*.jou
+*.log
+*.str
+
+# Python
+__pycache__/

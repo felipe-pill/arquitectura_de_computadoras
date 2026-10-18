@@ -3,7 +3,7 @@
 
 module basys3_uart_echo (
   input  wire clk100mhz,     // 100 MHz system clock
-  input  wire btn_reset_n,   // center button, active-low
+  input  wire btn_reset,     // center button, active-high (Basys 3 buttons)
   input  wire uart_rxd,      // from PC (FTDI)
   output wire uart_txd      // to PC (FTDI)
 
@@ -13,15 +13,15 @@ module basys3_uart_echo (
 );
 
   // --------------------------------------------------------------------------
-  // Reset: make it active-high and synchronize
+  // Reset: 2-FF synchronizer for the async button; starts asserted so the
+  // design also resets at power-up. All logic uses rst as a synchronous reset.
   // --------------------------------------------------------------------------
-reg rst_sync = 1'b1;
-always @(posedge clk100mhz) begin
-  rst_sync <= btn_reset_n;  // direct sample, active high
-end
+  reg [1:0] rst_sync = 2'b11;
+  always @(posedge clk100mhz) begin
+    rst_sync <= {rst_sync[0], btn_reset};
+  end
 
-wire rst = rst_sync;
-
+  wire rst = rst_sync[1];
 
 
   // --------------------------------------------------------------------------
@@ -69,7 +69,7 @@ wire rst = rst_sync;
   reg  [7:0] hold_b = 8'h00;
 
   // tx_start must be a 1-cycle pulse on clk
-  always @(posedge clk100mhz or posedge rst) begin
+  always @(posedge clk100mhz) begin
     if (rst) begin
       tx_start <= 1'b0;
       tx_data  <= 8'h00;

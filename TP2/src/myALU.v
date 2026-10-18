@@ -1,3 +1,4 @@
+`timescale 1ns/1ps
 `default_nettype none
 
 module myALU #(
@@ -31,20 +32,22 @@ module myALU #(
     localparam [OPCODE_WIDTH-1:0] OP_SRL = 6'b000010; // desplazamiento lógico a la derecha
     localparam [OPCODE_WIDTH-1:0] OP_SRA = 6'b000011; // desplazamiento aritmético a la derecha
 
-    // Cantidad de bits usados para el desplazamiento (0..7)
-    localparam integer SHAMT_WIDTH = 3; 
-    wire [2:0] shamt = B[SHAMT_WIDTH-1:0]; // se toma el valor de desplazamiento de los bits bajos de B
+    localparam [DATA_WIDTH-1:0] ZERO = {DATA_WIDTH{1'b0}};
+
+    // Cantidad de bits usados para el desplazamiento (0..DATA_WIDTH-1)
+    localparam integer SHAMT_WIDTH = $clog2(DATA_WIDTH);
+    wire [SHAMT_WIDTH-1:0] shamt = B[SHAMT_WIDTH-1:0]; // se toma de los bits bajos de B
 
     // Variables auxiliares para suma y resta extendida (con bit extra de acarreo)
-    reg [8:0] add9, sub9;
+    reg [DATA_WIDTH:0] add_ext, sub_ext;
 
     // Registro de los operandos y del opcode
     always @(posedge clk) begin
         if (reset) begin
-            A  <= 8'h00;
-            B  <= 8'h00;
+            A  <= ZERO;
+            B  <= ZERO;
             Op <= OP_ADD; // valor por defecto tras el reset
-        end 
+        end
         else begin
             if (e1) A  <= data;                    // captura de A
             if (e2) B  <= data;                    // captura de B
@@ -54,23 +57,23 @@ module myALU #(
 
     // Bloque combinacional principal: operaciones de la ALU
     always @* begin
-        result   = {DATA_WIDTH{1'b0}};
+        result   = ZERO;
         carry    = 1'b0;
         overflow = 1'b0;
+        add_ext  = {1'b0, A} + {1'b0, B};        // suma extendida
+        sub_ext  = {1'b0, A} + {1'b0, ~B} + 1'b1; // resta usando complemento a dos
 
         case (Op)
             OP_ADD: begin
-                add9   = {1'b0, A} + {1'b0, B};   // suma extendida
-                result = add9[DATA_WIDTH-1:0];    // resultado de 8 bits
-                carry  = add9[DATA_WIDTH];        // acarreo
+                result = add_ext[DATA_WIDTH-1:0];
+                carry  = add_ext[DATA_WIDTH];     // acarreo
                 overflow = (~A[DATA_WIDTH-1] & ~B[DATA_WIDTH-1] &  result[DATA_WIDTH-1]) |
                            ( A[DATA_WIDTH-1] &  B[DATA_WIDTH-1] & ~result[DATA_WIDTH-1]); // detección de overflow
             end
-            
+
             OP_SUB: begin
-                sub9   = {1'b0, A} + {1'b0, ~B} + 9'd1; // resta usando complemento a dos
-                result = sub9[DATA_WIDTH-1:0];
-                carry  = sub9[DATA_WIDTH]; // "borrow" (préstamo)
+                result = sub_ext[DATA_WIDTH-1:0];
+                carry  = sub_ext[DATA_WIDTH]; // 1 = sin préstamo (A >= B sin signo)
                 overflow = (~A[DATA_WIDTH-1] &  B[DATA_WIDTH-1] &  result[DATA_WIDTH-1]) |
                            ( A[DATA_WIDTH-1] & ~B[DATA_WIDTH-1] & ~result[DATA_WIDTH-1]);
             end
@@ -82,12 +85,14 @@ module myALU #(
             OP_SRL: result = A >>  shamt;       // desplazamiento lógico a la derecha
             OP_SRA: result = $signed(A) >>> shamt; // desplazamiento aritmético a la derecha
 
-            default: result = {DATA_WIDTH{1'b0}}; // valor por defecto
+            default: result = ZERO; // valor por defecto
         endcase
     end
 
     // Flags de estado
-    assign zero = (result == {DATA_WIDTH{1'b0}}); // resultado igual a cero
-    assign neg  = result[DATA_WIDTH-1];           // bit de signo (1 = negativo)
+    assign zero = (result == ZERO);     // resultado igual a cero
+    assign neg  = result[DATA_WIDTH-1]; // bit de signo (1 = negativo)
 
 endmodule
+
+`default_nettype wire

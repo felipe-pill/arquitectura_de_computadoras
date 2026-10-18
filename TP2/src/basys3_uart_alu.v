@@ -9,10 +9,11 @@ module basys3_uart_alu (
 );
 
   // ---------------- Reset sync ----------------
-  reg [1:0] rst_sync;
-  always @(posedge clk100mhz or posedge btn_reset) begin
-    if (btn_reset) rst_sync <= 2'b11;
-    else           rst_sync <= {rst_sync[0], 1'b0};
+  // 2-FF synchronizer for the async button; starts asserted so the design
+  // also resets at power-up. All logic uses rst as a synchronous reset.
+  reg [1:0] rst_sync = 2'b11;
+  always @(posedge clk100mhz) begin
+    rst_sync <= {rst_sync[0], btn_reset};
   end
   wire rst = rst_sync[1];
 
@@ -102,7 +103,7 @@ module basys3_uart_alu (
 
   reg [4:0] st;
 
-  always @(posedge clk100mhz or posedge rst) begin
+  always @(posedge clk100mhz) begin
     if (rst) begin
       st       <= S_IDLE;
       op_reg   <= 8'h00;
@@ -130,14 +131,13 @@ module basys3_uart_alu (
           else begin op_reg <= rx_data; st <= S_GET_A; end
         end
 
+        // A and B are raw data: any value (including HDR_IN) is a valid operand
         S_GET_A: if (rx_valid && !rx_ferr) begin
-          if (rx_data == HDR_IN) st <= S_GET_OP;
-          else begin a_reg <= rx_data; st <= S_GET_B; end
+          a_reg <= rx_data; st <= S_GET_B;
         end
 
         S_GET_B: if (rx_valid && !rx_ferr) begin
-          if (rx_data == HDR_IN) st <= S_GET_OP;
-          else begin b_reg <= rx_data; st <= S_LOAD_A; end
+          b_reg <= rx_data; st <= S_LOAD_A;
         end
 
         // --- load into ALU (one-cycle strobes) ---
