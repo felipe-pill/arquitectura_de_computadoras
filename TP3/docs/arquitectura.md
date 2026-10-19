@@ -358,13 +358,28 @@ ciclos = N + 4 + stalls_load_use + 2*(beq/bne tomados + jalr) + 1*jal
 | 2 | `!en` (pausa/step) o `halted` | se mantiene | se mantiene | se mantiene |
 | 3 | `ex_redirect` (salto tomado o jalr en EX) | destino EX | burbuja | burbuja |
 | 4 | `halt_accept` (HALT aceptado en ID) | `if_id.pc` | burbuja | marcador HALT |
-| 5 | `halting` (drenando) | se mantiene | burbuja | se carga normal* |
+| 5 | `halting` (drenando) | se mantiene | burbuja | burbuja* |
 | 6 | `load_use` | se mantiene | se mantiene | burbuja |
 | 7 | `id_jal` | destino jal | burbuja | se carga (jal) |
-| 8 | normal | `pc+4` | `{PC, imem_dout}` | se carga |
+| 8 | normal | `pc+4` | `{PC, imem_dout}` | se carga* |
 
-\* Mientras se drena, el IF/ID ya solo contiene burbujas, así que "cargar
-normal" mete burbujas.
+\* **Burbuja heredada:** si el IF/ID contiene una burbuja (`if_id.valid = 0`),
+el ID/EX también recibe una burbuja en vez de decodificarla. Pasa siempre
+mientras se drena, y en el ciclo siguiente a cualquier flush del IF/ID.
+
+Por eso el flush del ID/EX tiene tres términos:
+
+```
+id_ex_flush = ex_redirect | load_use | !if_id.valid
+```
+
+El tercer término no cambia lo que calcula el procesador. La burbuja del
+IF/ID es una NOP (`addi x0, x0, 0`), que el decoder ya convierte en una
+instrucción sin efectos (`reg_write = 0` porque rd = x0). Pero si se
+decodificara, quedaría con `alu_src = 1`. Con el flush, toda burbuja del ID/EX
+tiene todos los bits de control en 0, sin importar cómo se generó, que es lo
+que promete el volcado de estado (protocol.md §6.2) y lo que la TUI necesita
+para mostrar etapas vacías.
 
 Combinaciones imposibles, que simplifican la lógica:
 - `load_use` y `ex_redirect` son excluyentes: el primero exige un load en EX
@@ -552,8 +567,9 @@ Las instrucciones más viejas que el HALT ya están en EX/MEM y MEM/WB y
 siguen su curso normal. Ninguna puede cancelarse: un HALT aceptado implica
 que no había salto tomado en EX, y detrás del marcador no hay nada.
 
-`halted <= 1` en el flanco en que el marcador **sale** de MEM/WB. En ese mismo
-flanco MEM/WB recibe la burbuja que viene de EX/MEM. Resultado:
+`halted <= 1` (y `halting <= 0`) en el flanco en que el marcador **sale** de
+MEM/WB. En ese mismo flanco MEM/WB recibe la burbuja que viene de EX/MEM.
+Resultado:
 
 > **Invariante: `halted = 1` ⇒ IF/ID, ID/EX, EX/MEM y MEM/WB contienen
 > burbujas**, todas las instrucciones anteriores al HALT escribieron su

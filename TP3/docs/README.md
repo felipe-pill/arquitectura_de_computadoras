@@ -3,7 +3,7 @@
 Procesador RISC-V RV32I segmentado en 5 etapas con Debug Unit por UART, para
 Basys 3. Especificación: [`../SPEC.md`](../SPEC.md).
 
-Estado: **Fases 0 y 1 revisadas; Fase 2 (módulos del datapath) terminada.**
+Estado: **Fases 0-2 revisadas; Fase 3 (pipeline completo con riesgos, HALT y drenaje) terminada.**
 
 | Documento | Contenido |
 |---|---|

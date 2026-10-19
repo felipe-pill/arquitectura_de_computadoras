@@ -163,6 +163,144 @@ def write_isa_vectors(path, seed=2026):
     return len(vectors)
 
 
+# ---------------------------------------------------------------------------
+# CPU-level tests (tb_cpu_core): programs + expected final state from the ISS
+# ---------------------------------------------------------------------------
+
+CPU_MAX_CYCLES = 3000       # must match MAX_CYCLES in tb_cpu_core.v
+CPU_MAX_WORDS = 1 << 17     # stream array size in tb_cpu_core.v
+CPU_MAGIC = 0xC0DE0001
+ASM_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "asm")
+
+# Short programs for edge cases (same situations as test_iss.py)
+EXTRA_PROGRAMS = {
+    "minimal": "addi x1, x0, 5\nebreak",
+    "illegal": "addi x1, x0, 1\n.word 0\naddi x1, x0, 2",
+    "ecall": ".word 0x00000073",
+    "timeout_loop": "loop: j loop",
+    "jump_oor": "jal x0, 64\nebreak",
+    "load_then_jal": "lw x1, 0(x0)\njal x2, 4\nebreak",
+    "dmem_alias": "lui x1, 1\naddi x2, x0, 77\nsw x2, 4(x1)\nlw x3, 4(x0)\nebreak",
+    "misaligned": """
+        addi x1, x0, 0x100
+        lui  x2, 0x11223
+        addi x2, x2, 0x344
+        sw   x2, 2(x1)
+        lw   x3, 3(x1)
+        lhu  x4, 1(x1)
+        lhu  x5, 3(x1)
+        addi x6, x0, 0x55
+        sh   x6, 3(x1)
+        lw   x7, 0(x1)
+        ebreak""",
+    "misaligned_fetch": "addi x5, x0, 10\njalr x0, 0(x5)\naddi x6, x0, 1\nebreak",
+    "branch_after_load_x0": "lw x0, 0(x0)\nbeq x0, x0, 8\nnop\nebreak",
+    "jalr_after_load": "addi x1, x0, 16\nsw x1, 0(x0)\nlw x2, 0(x0)\njalr x3, 0(x2)\nebreak",
+    "store_after_load": "addi x1, x0, 9\nsw x1, 0(x0)\nlw x2, 0(x0)\nsw x2, 8(x0)\nebreak",
+    "back_to_back_jal": "jal x1, 4\njal x2, 4\njal x3, 4\nebreak",
+    "branch_to_branch": "beq x0, x0, 4\nbeq x0, x0, 4\nbne x0, x0, -8\nebreak",
+    "illegal_wrong_path": "beq x0, x0, 8\n.word 0\nebreak",
+    "oor_wrong_path": "addi x1, x0, 1\nbeq x0, x0, -4",
+}
+
+
+def random_program(rng, n_instr):
+    """A random program over the whole subset, ending with ebreak.
+
+    Registers are mostly x0..x7 so dependencies (forwarding, load-use) are
+    dense. Branch and jal offsets are short and mostly forward; the backward
+    ones make some programs loop until TIMEOUT. Most jalr targets are forward
+    inside the program (x0 + absolute address); the rest use a register value
+    and land anywhere (usually OOR). About 1 program in 10 gets one illegal word.
+    The ISS models every one of these endings exactly.
+    """
+    def reg():
+        return rng.randrange(8) if rng.random() < 0.85 else rng.randrange(32)
+
+    def short_offset(p_back, back, fwd):
+        if rng.random() < p_back:
+            return 4 * rng.randrange(-back, 0)
+        return 4 * rng.randrange(1, fwd + 1)
+
+    kinds = (["r"] * 25 + ["i"] * 25 + ["load"] * 15 + ["store"] * 12
+             + ["branch"] * 10 + ["lui"] * 5 + ["jal"] * 4 + ["jalr"] * 2)
+    words = []
+    for _ in range(n_instr):
+        k = rng.choice(kinds)
+        if k == "r":
+            ins = Instr(rng.choice(list(isa.R_OPS)), reg(), reg(), reg())
+        elif k == "i":
+            name = rng.choice(list(isa.I_ALU_OPS) + list(isa.SHIFT_IMM_OPS))
+            imm = rng.randrange(32) if name in isa.SHIFT_IMM_OPS else rng.randrange(-2048, 2048)
+            ins = Instr(name, reg(), reg(), 0, imm)
+        elif k == "load":
+            ins = Instr(rng.choice(list(isa.LOAD_OPS)), reg(), reg(), 0, rng.randrange(-64, 64))
+        elif k == "store":
+            ins = Instr(rng.choice(list(isa.STORE_OPS)), 0, reg(), reg(), rng.randrange(-64, 64))
+        elif k == "branch":
+            ins = Instr(rng.choice(list(isa.BRANCH_OPS)), 0, reg(), reg(), short_offset(0.2, 6, 4))
+        elif k == "lui":
+            ins = Instr("lui", reg(), 0, 0, rng.randrange(1 << 20))
+        elif k == "jal":
+            ins = Instr("jal", reg(), 0, 0, short_offset(0.1, 4, 4))
+        elif rng.random() < 0.8:  # jalr forward to an address inside the program
+            ins = Instr("jalr", reg(), 0, 0, 4 * rng.randrange(len(words) + 1, n_instr + 1))
+        else:                     # jalr through a register value
+            ins = Instr("jalr", reg(), reg(), 0, rng.randrange(-16, 64))
+        words.append(isa.encode(ins))
+    if rng.random() < 0.1:
+        words[rng.randrange(n_instr)] = rng.getrandbits(32) & ~0x7F  # opcode 0: illegal
+    words.append(isa.EBREAK)
+    return words
+
+
+def cpu_test_programs(seed=2026, n_random=80):
+    """(name, words) for every CPU-level test."""
+    import assembler
+    tests = []
+    for fname in sorted(os.listdir(ASM_DIR)):
+        if fname.endswith(".s"):
+            with open(os.path.join(ASM_DIR, fname), encoding="utf-8") as f:
+                tests.append((fname[:-2], assembler.assemble(f.read())))
+    for name, src in EXTRA_PROGRAMS.items():
+        tests.append((name, assembler.assemble(src)))
+    rng = random.Random(seed)
+    for i in range(n_random):
+        tests.append((f"random_{i:02d}", random_program(rng, rng.randrange(40, 120))))
+    return tests
+
+
+def _name_words(name):
+    raw = name.encode("ascii")[:16].rjust(16, b" ")
+    return [int.from_bytes(raw[i:i + 4], "big") for i in range(0, 16, 4)]
+
+
+def write_cpu_tests(path, seed=2026):
+    """cpu_tests.hex: a stream of 32-bit words, one per line:
+        magic, n_tests, max_cycles, then per test:
+        name (4 words, ASCII), prog_len, program words,
+        exp_pc, exp_cycles, exp_reason, exp_dmem_used,
+        x0..x31, dmem words [0, dmem_used)
+    """
+    import iss
+    stream = []
+    tests = cpu_test_programs(seed)
+    reasons = {}
+    for name, words in tests:
+        res = iss.run(words, max_cycles=CPU_MAX_CYCLES)
+        reasons[res.halt_reason] = reasons.get(res.halt_reason, 0) + 1
+        stream += _name_words(name)
+        stream += [len(words)] + words
+        stream += [res.pc, res.cycles, res.halt_reason, res.dmem_used]
+        stream += res.regs + res.used_dmem()
+    stream = [CPU_MAGIC, len(tests), CPU_MAX_CYCLES] + stream
+    assert len(stream) <= CPU_MAX_WORDS, "raise MAX_WORDS in tb_cpu_core.v"
+    with open(path, "w", encoding="ascii", newline="\n") as f:
+        for w in stream:
+            f.write(f"{w & isa.MASK32:08x}\n")
+    return len(tests), reasons
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if len(argv) != 1:
@@ -171,7 +309,10 @@ def main(argv=None):
     out_dir = argv[0]
     os.makedirs(out_dir, exist_ok=True)
     n = write_isa_vectors(os.path.join(out_dir, "isa_vectors.hex"))
-    print(f"gen_vectors: {n} decoder/imm_gen vectors -> {out_dir}")
+    print(f"gen_vectors: {n} decoder/imm_gen vectors")
+    n, reasons = write_cpu_tests(os.path.join(out_dir, "cpu_tests.hex"))
+    summary = ", ".join(f"{isa.HALT_REASON_NAMES[r]}={c}" for r, c in sorted(reasons.items()))
+    print(f"gen_vectors: {n} CPU tests ({summary}) -> {out_dir}")
     return 0
 
 

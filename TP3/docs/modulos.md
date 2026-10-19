@@ -1,6 +1,6 @@
 # TP3 - Módulos y puertos
 
-Estado: **Fase 0 (diseño) - revisado**. Los nombres y anchos son el
+Estado: **Fases 0-3: el core está implementado (`TP3/src/`)**; la Debug Unit y los topes son de las fases 4-7. Los nombres y anchos son el
 contrato para las fases 2-5. Los submódulos de la Debug Unit (sección 4)
 pueden ajustarse en la fase 5 sin cambiar protocol.md.
 
@@ -126,6 +126,11 @@ Parámetros: `IMEM_ADDR_W`, `DMEM_ADDR_W`, `MAX_CYCLES`.
 | `dbg_reg_data` | out | 32 | |
 | `dbg_core_vec` | out | 512 | PC + registros de pipeline (protocol.md §6.2) |
 
+Los registros ID/EX, EX/MEM y MEM/WB reciben las señales de control como
+**una sola palabra empaquetada con el layout del volcado de estado**
+(protocol.md §6.2). Así `dbg_core_vec` es una simple concatenación y el
+layout se define en un solo lugar. Una burbuja es la palabra entera en 0.
+
 Lógica "suelta" dentro de `cpu_core` (no amerita módulo propio):
 - `en_int = en & ~halted`;
 - muxes de forwarding;
@@ -212,8 +217,9 @@ Como la burbuja lleva una NOP real, el decoder no necesita mirar `valid`.
 | Puerto | Dir | Ancho | Descripción |
 |---|---|---|---|
 | `clk`, `rst`, `en` | in | 1 | |
-| `flush` | in | 1 | `ex_redirect | load_use` → burbuja |
-| `in_*` / salidas | | | `pc`(32), `rs1_data`(32), `rs2_data`(32), `imm`(32), `rs1`(5), `rs2`(5), `rd`(5), `alu_op`(4), `alu_src`, `link`, `reg_write`, `mem_read`, `mem_write`, `funct3`(3), `branch`, `jalr`, `is_halt`, `valid` |
+| `flush` | in | 1 | `ex_redirect \| load_use \| !if_id_valid` → burbuja (arquitectura.md §3.4) |
+| `in_pc`, `in_rs1_data`, `in_rs2_data`, `in_imm` / salidas | in/out | 32 c/u | |
+| `in_ctrl` / `ctrl` | in/out | 31 | control empaquetado con el layout del volcado (protocol.md §6.2): `rs1`, `rs2`, `rd`, `alu_op`, `alu_src`, `link`, `reg_write`, `mem_read`, `mem_write`, `funct3`, `branch`, `jalr`, `is_halt`, `valid` |
 
 `in_is_halt = halt_cond`. Cuando el slot es un HALT aceptado, el decoder ya
 anuló el resto del control, así que entra el marcador HALT.
@@ -259,7 +265,8 @@ Sin flags: el branch usa un comparador propio.
 | Puerto | Dir | Ancho | Descripción |
 |---|---|---|---|
 | `clk`, `rst`, `en` | in | 1 | |
-| `in_*` / salidas | | | `pc`(32), `result`(32), `store_data`(32, rs2 sin alinear, para mostrar), `rd`(5), `reg_write`, `mem_read`, `mem_write`, `funct3`(3), `is_halt`, `valid` |
+| `in_pc`, `in_result`, `in_store_data` / salidas | in/out | 32 c/u | `store_data` = rs2 forwardeado sin alinear, solo para mostrar |
+| `in_ctrl` / `ctrl` | in/out | 13 | layout del volcado: `rd`, `reg_write`, `mem_read`, `mem_write`, `funct3`, `is_halt`, `valid` |
 
 ### `load_align`
 | Puerto | Dir | Ancho |
@@ -273,7 +280,8 @@ Sin flags: el branch usa un comparador propio.
 | Puerto | Dir | Ancho | Descripción |
 |---|---|---|---|
 | `clk`, `rst`, `en` | in | 1 | |
-| `in_*` / salidas | | | `pc`(32), `wb_data`(32), `rd`(5), `reg_write`, `mem_read`, `is_halt`, `valid` |
+| `in_pc`, `in_wb_data` / salidas | in/out | 32 c/u | |
+| `in_ctrl` / `ctrl` | in/out | 9 | layout del volcado: `rd`, `reg_write`, `mem_read`, `is_halt`, `valid` |
 
 ### `halt_ctrl`
 | Puerto | Dir | Ancho | Descripción |
@@ -343,13 +351,9 @@ Submódulos (las interfaces internas pueden refinarse en la fase 5):
   - Durante RUN no atiende comandos: las tramas que llegan se descartan.
   - Valida estado y longitud y elige el código de respuesta.
 
-## 5. Testbenches previstos (`TP3/sim/`)
+## 5. Testbenches (`TP3/sim/`)
 
-Uno por módulo. Los de la fase 2 (`tb_alu`, `tb_regfile`, `tb_imm_gen`,
-`tb_decoder`, `tb_load_align`, `tb_store_align`, `tb_imem`, `tb_dmem`) están
-descriptos en verificacion.md. Faltan `tb_forward_unit`, `tb_hazard_unit`,
-`tb_branch_unit`, etc. (fase 3), más:
-- `tb_cpu_core`: corre cada programa de `asm/`, compara con el resultado del
-  ISS y verifica la cantidad de ciclos;
-- `tb_debug_unit` / `tb_system_top`: tramas serie reales, verifica los bytes
-  del volcado.
+Hay uno por módulo del core, más `tb_cpu_core` (programas completos contra el
+ISS); todos están descriptos en verificacion.md. Faltan los de la Debug Unit y
+`tb_system_top` (fase 5: tramas serie reales, verifica los bytes del
+volcado).
