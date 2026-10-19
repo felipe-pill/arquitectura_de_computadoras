@@ -1,0 +1,24 @@
+# Loads and stores at every width, with sign/zero extension and lane selection.
+# Base address 0x100 = dmem word 64. No load-use stalls.
+        addi  x1, x0, 0x100     # x1  = 00000100
+        lui   x2, 0x89abd       # x2  = 89abd000
+        addi  x2, x2, -0x211    # x2  = 89abcdef
+        sw    x2, 0(x1)         # [0x100] = 89abcdef
+        lw    x3, 0(x1)         # x3  = 89abcdef
+        lb    x4, 0(x1)         # x4  = ffffffef
+        lbu   x5, 1(x1)         # x5  = 000000cd
+        lb    x6, 3(x1)         # x6  = ffffff89
+        lh    x7, 2(x1)         # x7  = ffff89ab
+        lhu   x8, 0(x1)         # x8  = 0000cdef
+        lh    x9, 0(x1)         # x9  = ffffcdef
+        sb    x2, 4(x1)         # [0x104] = 000000ef
+        sb    x2, 7(x1)         # [0x104] = ef0000ef
+        sh    x2, 8(x1)         # [0x108] = 0000cdef
+        sh    x2, 14(x1)        # [0x10c] = cdef0000
+        lw    x10, 4(x1)        # x10 = ef0000ef
+        lw    x11, 8(x1)        # x11 = 0000cdef
+        lw    x12, 12(x1)       # x12 = cdef0000
+        lbu   x13, 7(x1)        # x13 = 000000ef
+        lhu   x14, 14(x1)       # x14 = 0000cdef
+        sw    x0, -4(x1)        # [0x0fc] = 00000000 (negative offset)
+        ebreak                  # dmem_used = 68 words (highest written: word 67)

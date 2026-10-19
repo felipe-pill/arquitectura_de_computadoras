@@ -19,8 +19,14 @@ Target board: Basys 3 (Artix-7, xc7a35tcpg236-1), 100 MHz clock.
 ## Verilog conventions
 - Verilog-2001 (plain `.v`, no SystemVerilog) unless told otherwise.
 - Sequential logic: `always @(posedge clk)` with non-blocking `<=` only.
+  A clocked block that also contains combinational logic (e.g. an FSM with
+  next-state logic inline) still uses non-blocking `<=` only.
 - Combinational logic: `always @(*)` with blocking `=`, every output assigned
   in every branch (default assignment at the top) - no inferred latches.
+- Never mix blocking `=` and non-blocking `<=` in the same block.
+- Never assign the same variable from more than one block (`always`, `assign`
+  or `initial`). Only exception: an `initial` block that sets memory/ROM
+  contents (becomes the bitstream init value).
 - Reset: synchronous, active-high (Xilinx 7-series recommendation; Basys 3
   buttons are active-high). Never `always @(posedge clk or posedge rst)`.
   Top levels pass the reset button through a 2-FF synchronizer initialized
