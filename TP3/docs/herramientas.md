@@ -7,6 +7,7 @@ Estado: **Fase 1 terminada**. Python 3, solo biblioteca estándar.
 | `TP3/py/isa.py` | tabla de instrucciones del subconjunto, decodificador estricto, codificador y desensamblador |
 | `TP3/py/assembler.py` | ensamblador de dos pasadas (salida .hex, .bin, .coe) |
 | `TP3/py/iss.py` | simulador de referencia (ISS) con modelo de ciclos del pipeline |
+| `TP3/py/gen_vectors.py` | genera los vectores de prueba de los testbenches Verilog (verificacion.md §2, §3.1) |
 | `TP3/py/test_assembler.py` | tests de codificación, sintaxis, errores, decodificador y formatos de salida |
 | `TP3/py/test_iss.py` | tests de semántica, HALT/OOR/TIMEOUT/ILLEGAL, ciclos y memoria |
 | `TP3/asm/*.s` | programas de ejemplo, uno por característica (sección 4) |

@@ -10,6 +10,11 @@ rem
 rem  Compiles every .v in <TP>\src and <TP>\sim, elaborates the
 rem  testbench module, runs it, and fails if the log contains
 rem  "TEST FAILED" or a $fatal.
+rem
+rem  If <TP>\sim\prebuild.bat exists, it is called first with the
+rem  build directory and the testbench name. A TP uses it to put
+rem  test data in the build directory, where the simulation runs,
+rem  so testbenches can open files ($readmemh) by plain name.
 rem ============================================================
 
 rem --- EDIT THIS to match your Vivado install ---
@@ -36,6 +41,11 @@ if not exist "%ROOT%%TP%\src" (
 
 if not exist "%BUILD%" mkdir "%BUILD%"
 pushd "%BUILD%"
+
+if exist "%ROOT%%TP%\sim\prebuild.bat" (
+  echo === Pre-build %TP% ===
+  call "%ROOT%%TP%\sim\prebuild.bat" "%BUILD%" %TB% || goto fail
+)
 
 set SRCS=
 for %%f in ("%ROOT%%TP%\src\*.v" "%ROOT%%TP%\sim\*.v") do set SRCS=!SRCS! "%%~ff"

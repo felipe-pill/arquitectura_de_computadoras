@@ -491,8 +491,8 @@ programa que escribe solo en una dirección alta provoca un volcado grande.
 - `dmem`: ceros (valor de bitstream), y se borra en cada reset de la Debug
   Unit (sección 6.3).
 - Banco de registros: flip-flops con reset síncrono a 0.
-- Pendiente para la fase 2 o 4: cómo pasar a `$readmemh` una ruta absoluta
-  desde `sim.bat` (SPEC §9).
+- Rutas de `$readmemh` en simulación: los archivos se copian o generan en
+  el directorio de build antes de simular (verificacion.md §2).
 
 ---
 

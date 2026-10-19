@@ -345,9 +345,10 @@ Submódulos (las interfaces internas pueden refinarse en la fase 5):
 
 ## 5. Testbenches previstos (`TP3/sim/`)
 
-Uno por módulo (`tb_alu`, `tb_regfile`, `tb_imm_gen`, `tb_decoder`,
-`tb_load_align`, `tb_store_align`, `tb_imem`, `tb_dmem`, `tb_forward_unit`,
-`tb_hazard_unit`, `tb_branch_unit`, ...), más:
+Uno por módulo. Los de la fase 2 (`tb_alu`, `tb_regfile`, `tb_imm_gen`,
+`tb_decoder`, `tb_load_align`, `tb_store_align`, `tb_imem`, `tb_dmem`) están
+descriptos en verificacion.md. Faltan `tb_forward_unit`, `tb_hazard_unit`,
+`tb_branch_unit`, etc. (fase 3), más:
 - `tb_cpu_core`: corre cada programa de `asm/`, compara con el resultado del
   ISS y verifica la cantidad de ciclos;
 - `tb_debug_unit` / `tb_system_top`: tramas serie reales, verifica los bytes

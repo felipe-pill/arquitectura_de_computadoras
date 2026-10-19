@@ -3,13 +3,14 @@
 Procesador RISC-V RV32I segmentado en 5 etapas con Debug Unit por UART, para
 Basys 3. Especificación: [`../SPEC.md`](../SPEC.md).
 
-Estado: **Fase 0 (diseño) revisada; Fase 1 (ensamblador + ISS) terminada.** No hay RTL.
+Estado: **Fases 0 y 1 revisadas; Fase 2 (módulos del datapath) terminada.**
 
 | Documento | Contenido |
 |---|---|
 | [arquitectura.md](arquitectura.md) | diagramas de bloques (Mermaid), decodificación, riesgos, memorias/BRAM, HALT y drenaje, enable global y step, resets, lectura de estado, reuso de TPs anteriores |
 | [modulos.md](modulos.md) | jerarquía y puertos de cada módulo |
 | [protocol.md](protocol.md) | protocolo UART completo: tramas, comandos, errores, formato exacto del volcado, ejemplos |
+| [verificacion.md](verificacion.md) | cómo se simula, solución de `$readmemh` (pre-build), qué cubre cada testbench, errores inyectados |
 | [herramientas.md](herramientas.md) | ensamblador, ISS (con modelo de ciclos), programas de ejemplo de `TP3/asm/` y cómo correr los tests |
 
 ## Resumen de decisiones
