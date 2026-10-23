@@ -7,7 +7,7 @@ implementado. El estado de cada fase está en [README.md](README.md).
 Documentos relacionados:
 - [modulos.md](modulos.md): lista de módulos con sus puertos.
 - [protocol.md](protocol.md): protocolo UART entre la PC y la Debug Unit.
-- [README.md](README.md): índice, resumen de decisiones y puntos abiertos.
+- [README.md](README.md): estado por fase, índice y resumen de decisiones.
 
 Convención de este documento: cada decisión tiene la forma
 **Decisión / Alternativas consideradas / Por qué**.
@@ -20,7 +20,7 @@ Convención de este documento: cada decisión tiene la forma
 
 ```mermaid
 flowchart LR
-    HOST["PC host<br/>(Python: ensamblador, ISS, CLI/TUI)"]
+    HOST["PC host<br/>(Python: ensamblador, ISS, CLI)"]
 
     subgraph BOARD["basys3_top (solo en placa)"]
         CLKIN["clk 100 MHz"] --> MMCM["MMCM<br/>(clk_sys)"]
@@ -40,7 +40,7 @@ flowchart LR
     MMCM -->|clk_sys| SYS
     RSYNC -->|rst| SYS
     DBG -->|"core_rst, core_en,<br/>imem_limit"| CORE
-    CORE -->|"halted, contadores,<br/>dbg_core_vec, dbg_reg_data"| DBG
+    CORE -->|"halted, cycle_cnt,<br/>dbg_core_vec, dbg_reg_data"| DBG
     DBG -->|"puerto de escritura<br/>(carga de programa)"| IMEM
     IMEM -->|"puerto de lectura<br/>(fetch)"| CORE
     CORE <-->|"puerto A: lectura/escritura"| DMEM
@@ -380,7 +380,7 @@ IF/ID es una NOP (`addi x0, x0, 0`), que el decoder ya convierte en una
 instrucción sin efectos (`reg_write = 0` porque rd = x0). Pero si se
 decodificara, quedaría con `alu_src = 1`. Con el flush, toda burbuja del ID/EX
 tiene todos los bits de control en 0, sin importar cómo se generó, que es lo
-que promete el volcado de estado (protocol.md §6.2) y lo que la TUI necesita
+que promete el volcado de estado (protocol.md §6.2) y lo que la CLI necesita
 para mostrar etapas vacías.
 
 Combinaciones imposibles, que simplifican la lógica:
@@ -488,7 +488,7 @@ la memoria en modo step **sin pisar** el dato de un load que está en MEM.
 **Decisión:** *high-water mark* por palabra: la Debug Unit espía las
 escrituras del core en el puerto A y mantiene
 `dmem_used = max(dmem_used, addr_palabra + 1)`. El volcado envía las palabras
-`[0, dmem_used)`. Se pone en 0 con RESET y LOAD.
+`[0, dmem_used)`. Se pone en 0 con RESET, LOAD y el reset de placa.
 
 **Alternativas:** un bit "escrita" por palabra (bitmap de 1024 bits) y enviar
 solo esas palabras con su dirección; enviar siempre los 4 KiB; un rango
@@ -502,9 +502,10 @@ programa que escribe solo en una dirección alta provoca un volcado grande.
 
 ### 4.5 Contenido inicial
 
-- `imem`: parámetro opcional `INIT_FILE` (`$readmemh`) con programa por
-  defecto, y `INIT_LEN` (palabras) como valor inicial de `prog_len`. Por
-  defecto `INIT_LEN = 0`: no hay programa hasta el primer LOAD.
+- `imem`: parámetro opcional `INIT_FILE` (`$readmemh`) con un programa por
+  defecto; en `system_top` se llama `IMEM_INIT_FILE`, y `IMEM_INIT_LEN`
+  (palabras) es el valor inicial de `prog_len`. Por defecto
+  `IMEM_INIT_LEN = 0`: no hay programa hasta el primer LOAD.
 - `dmem`: ceros (valor de bitstream), y se borra en cada reset de la Debug
   Unit (sección 6.3).
 - Banco de registros: flip-flops con reset síncrono a 0.
@@ -539,7 +540,7 @@ acepta como si fuera un `ebreak`.
 
 ```
 halt_cond   = if_id.stop_code != 0 || is_ebreak || illegal
-halt_accept = if_id.valid && halt_cond && !ex_redirect && en && !halting
+halt_accept = if_id.valid && halt_cond && !ex_redirect && !halting
 ```
 
 - **`!ex_redirect`:** si en EX hay un salto tomado, el slot de ID está en el
@@ -551,7 +552,8 @@ halt_accept = if_id.valid && halt_cond && !ex_redirect && en && !halting
   control (`rs1 = rs2 = 0`, sin escrituras), así que el slot nunca dispara un
   stall.
 
-Al aceptar, en el mismo flanco:
+Al aceptar, en el mismo flanco (habilitado: `en` no entra en `halt_accept`
+porque ya bloquea todos los registros que lo usan):
 1. `halting <= 1`, `halt_reason <= motivo`.
 2. ID/EX recibe un **marcador HALT**: `valid = 1`, `is_halt = 1`, `pc =
    if_id.pc`, ninguna escritura. Viaja por EX y MEM como una NOP visible.
@@ -761,4 +763,4 @@ Con flip-flops son 1024 FFs (de 41 600 disponibles) y ~3 mux 32:1 × 32 bits.
 | `TP2/py/*.py` | base de pyserial para la CLI (abrir puerto, `reset_input_buffer`, timeouts) |
 | `TP1/src/myALU.v` (SPEC lo llama `my_ALU.v`) | **no se reutiliza tal cual**: es de 8 bits, registra sus operandos internamente, usa opcodes estilo MIPS y le faltan sll, slt y sltu. Se reutiliza la idea (case por operación, `$signed` para sra) en una ALU combinacional nueva de 32 bits. |
 | `TP1/constrs/basys3.xdc`, `TP2/constrs/const.xdc` | base para `TP3/constrs/` (reloj W5, botón U18, UART B18/A18, LEDs); sin cambiar pines |
-| `TP3/src/*`, `TP3/sim/*` (intento anterior) | **se descartan**: core monolítico, memorias asíncronas, sin saltos, solo add/sub/addi/lw/sw, banco sin bypass WB→ID (lee datos viejos) y load-use que mira campos rs que la instrucción no usa. Se borran al empezar la fase 2 para que `sim.bat` no los compile. |
+| `TP3/src/*`, `TP3/sim/*` (intento anterior) | **se descartan**: core monolítico, memorias asíncronas, sin saltos, solo add/sub/addi/lw/sw, banco sin bypass WB→ID (lee datos viejos) y load-use que mira campos rs que la instrucción no usa. Se borraron al empezar la fase 2 para que `sim.bat` no los compile. |

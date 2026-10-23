@@ -138,6 +138,20 @@ module tb_cpu_core;
   reg running = 1'b0;
   integer hwm;  // dmem high-water mark seen on the core's port A
 
+  // Trace for TP3/py/test_hints_rtl.py: per cycle (first TRACE_CYCLES of
+  // each program) the debug vector and the hazard decisions the core takes
+  // on the next edge, to check the host CLI's "next cycle" hints.
+  localparam integer TRACE_CYCLES = 300;
+  integer trace_fd;
+
+  always @(posedge clk) begin
+    if (running && cycle_cnt < TRACE_CYCLES)
+      $fdisplay(trace_fd, "C %h %b %b %b %b %b %b %h %b %h %b",
+                vec, halting, halted, dut.fwd_a, dut.fwd_b, dut.load_use,
+                dut.ex_redirect, dut.ex_target, dut.id_jal, dut.id_jal_target,
+                dut.halt_accept);
+  end
+
   always @(posedge clk) begin
     if (running) begin
       if (core_dmem_we != 4'b0000 && core_dmem_addr + 1 > hwm)
@@ -165,6 +179,7 @@ module tb_cpu_core;
 
   // ---------------- Main ----------------
   initial begin
+    trace_fd = $fopen("core_trace.txt", "w");
     $readmemh("cpu_tests.hex", stream);
     p = 0;
     get(w0);
@@ -182,6 +197,7 @@ module tb_cpu_core;
       get(w0); get(w1); get(w2); get(w3);
       name = {w0, w1, w2, w3};
       get(w0); prog_len = w0;
+      $fdisplay(trace_fd, "T %0s", name);
 
       // 1. Reset, load the program, clear dmem
       @(negedge clk);
@@ -247,6 +263,7 @@ module tb_cpu_core;
                  name, halt_reason, pc_if, cycle_cnt, hwm);
     end
 
+    $fclose(trace_fd);
     if (errors == 0)
       $display("ALL TESTS PASSED (%0d programs, %0d checks)", n_tests, checks);
     else

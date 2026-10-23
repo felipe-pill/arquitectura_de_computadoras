@@ -46,8 +46,9 @@ basys3_top                      (solo placa: MMCM, sincronizador de reset, pines
     └── dmem                    (BRAM inferida, true dual port, B solo lectura)
 ```
 
-Las memorias quedan **fuera** de `cpu_core`. Así los tests a nivel CPU (fase 3)
-instancian `cpu_core + imem + dmem` con `$readmemh`, sin UART. El mux del
+Las memorias quedan **fuera** de `cpu_core`. Así los tests a nivel CPU
+(`tb_cpu_core`, `tb_cpu_step`) instancian `cpu_core + imem + dmem` y cargan
+los programas por el puerto de escritura de imem, sin UART. El mux del
 puerto A de dmem (core o borrado de la Debug Unit) es un `assign` en
 `system_top`.
 

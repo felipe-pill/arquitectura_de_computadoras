@@ -1,6 +1,7 @@
-# TP3 - Herramientas del host: ensamblador, ISS y programas de ejemplo
+# TP3 - Herramientas del host: ensamblador, ISS, CLI y programas de ejemplo
 
-Estado: **Fase 1 terminada**. Python 3, solo biblioteca estándar.
+Estado: **Fases 1 y 6 terminadas**. Python 3 con la biblioteca estándar; la
+CLI usa además pyserial.
 
 | Ruta | Contenido |
 |---|---|
@@ -10,6 +11,9 @@ Estado: **Fase 1 terminada**. Python 3, solo biblioteca estándar.
 | `TP3/py/gen_vectors.py` | genera los vectores de prueba de los testbenches Verilog: decoder/imm_gen y programas con su resultado esperado según el ISS (verificacion.md §2, §3.1, §4.2) |
 | `TP3/py/test_assembler.py` | tests de codificación, sintaxis, errores, decodificador y formatos de salida |
 | `TP3/py/test_iss.py` | tests de semántica, HALT/OOR/TIMEOUT/ILLEGAL, ciclos y memoria |
+| `TP3/py/protocol.py` | lado host del protocolo UART: tramas, decodificación del STATE, `DebugClient` (sección 6) |
+| `TP3/py/cli.py` | CLI interactiva para la placa (sección 6) |
+| `TP3/py/test_protocol.py`, `test_cli.py`, `test_hints_rtl.py` | tests del protocolo, de la CLI y de las pistas de riesgos contra el RTL (verificacion.md §7) |
 | `TP3/asm/*.s` | programas de ejemplo, uno por característica (sección 4) |
 
 Correr los tests desde la raíz del repo:
@@ -32,7 +36,7 @@ Módulo compartido entre el ensamblador, el ISS y (en la fase 6) la CLI.
 - **`encode(instr)`** hace lo inverso y valida rangos (inmediatos, offsets
   pares, shamt 0..31).
 - **`disassemble(word)`** devuelve texto que el ensamblador vuelve a aceptar,
-  por ejemplo `lw x1, -4(x2)` o `beq x1, x2, -8`. Lo va a usar la TUI.
+  por ejemplo `lw x1, -4(x2)` o `beq x1, x2, -8`. Lo usa la CLI (sección 6).
 - Constantes: `NOP`, `EBREAK` y los códigos `HALT_*` (0 NONE, 1 HALT,
   2 ILLEGAL, 3 OOR, 4 TIMEOUT), los mismos de protocol.md §6.1.
 
@@ -172,7 +176,7 @@ Además, `test_iss.py` cubre con programas cortos:
 - aliasing de dmem;
 - accesos y fetch desalineados.
 
-## 5. Cómo se verificaron los tests
+## 5. Cómo se verificaron los tests de la fase 1
 
 Además de pasar, los tests se validaron inyectando 9 errores a propósito en
 `isa.py` e `iss.py`, de a uno: shift aritmético como lógico, sin stall de
@@ -180,3 +184,66 @@ load-use, penalidad de jal incorrecta, límite de TIMEOUT corrido en uno,
 bits de inmediato de branch y de jal mal ubicados, codificación de `sra`
 incorrecta, jalr sin limpiar el bit 0, y cuenta final de ciclos corrida en
 uno. Cada error hizo fallar al menos un test.
+
+## 6. CLI para la placa (`cli.py`, fase 6)
+
+```
+python TP3/py/cli.py --port COM5                              # interactiva
+python TP3/py/cli.py --port COM5 -c "load TP3/asm/loop.s" -c run -c check
+```
+
+Opciones:
+- `--baud` (115200);
+- `--timeout`: segundos por respuesta, 2 por defecto (un RUN dura como
+  máximo 10 ms más la transmisión);
+- `--max-cycles`: el `MAX_CYCLES` del bitstream, para `check`;
+- `--no-color`.
+
+Con `-c` ejecuta los comandos en orden y termina con código 1 ante el primer
+error, útil para probar la placa con un script.
+
+| Comando | Qué hace |
+|---|---|
+| `load <archivo>` | ensambla (`.s`/`.asm`) o lee (`.hex`/`.bin`) y envía LOAD; acepta rutas de Windows y comillas para rutas con espacios |
+| `step [n]` | n comandos STEP (un ciclo de reloj cada uno; por defecto 1); se detiene si el core termina antes |
+| `run` | RUN hasta HALT, ILLEGAL, OOR o TIMEOUT |
+| `reset` | RESET: registros y dmem a 0, el programa queda cargado |
+| `dump` / `mem` | DUMP sin avanzar; `mem` muestra todas las palabras de dmem usadas |
+| `check` | compara el estado final con el ISS (`iss.run`) sobre el programa cargado en la sesión: motivo, PC, ciclos, registros y dmem |
+| `quit` | sale |
+
+Después de cada comando muestra:
+- **Línea de estado:** ciclo, READY / DRAINING / HALTED con el motivo,
+  tamaño del programa y palabras de dmem usadas.
+- **Pipeline:** la instrucción de cada etapa desensamblada, con los valores
+  en vuelo (operandos leídos en ID, resultado o acceso a memoria en MEM, el
+  `rd <= valor` de WB). Marca las burbujas, el marcador HALT, los slots de
+  detención (OOR/TIMEOUT) y un PC fuera del programa. Las instrucciones de
+  EX, MEM y WB se reconstruyen con el `pc` de cada etapa y el programa
+  cargado en la sesión, porque el volcado no las incluye.
+- **Próximo ciclo:** qué va a hacer el hardware en el siguiente flanco:
+  forwarding (de dónde y qué valor), stall de load-use, flush por salto
+  tomado o jalr (con el destino), jal en ID, aceptación de un slot de
+  detención y drenaje.
+
+  Se calcula en el host a partir de los registros de pipeline, con la misma
+  lógica que `forward_unit`, `hazard_unit`, `branch_unit` y `cpu_core`. Por
+  eso el protocolo no necesita un byte de riesgos. Está verificado contra el
+  RTL ciclo a ciclo (verificacion.md §7).
+- **Registros y dmem:** con lo que cambió desde la pantalla anterior
+  resaltado (amarillo, o `*` sin color). Tras `step n`, los cambios son
+  respecto del estado anterior a los n pasos.
+
+`protocol.py` sirve también fuera de la CLI:
+
+```python
+import serial, protocol
+with serial.Serial("COM5", 115200, timeout=2) as ser:
+    dbg = protocol.DebugClient(ser)
+    dbg.load(words); state = dbg.run()
+    print(state.halt_reason_name, state.cycles, state.regs[10])
+```
+
+Los errores de la placa se convierten en `DebugError`, con el código y el
+comando; las respuestas mal formadas o los timeouts, en `ProtocolError`.
+

@@ -14,7 +14,7 @@ por UART, para la Basys 3. La especificación completa está en
 | 3 | Pipeline completo: forwarding, load-use, saltos, **HALT y drenaje** | hecha |
 | 4 | Modo step, enable global y reset (verificación, sin cambios de RTL) | hecha |
 | 5 | Debug Unit y protocolo UART, con testbench a nivel de bits serie | hecha |
-| 6 | CLI/TUI en Python | pendiente |
+| 6 | CLI en Python para la placa | hecha |
 | 7 | Tope de placa, constraints, build, timing, frecuencia del MMCM | pendiente |
 | 8 | Documentación final y respuestas a las preguntas de SPEC §8 | pendiente |
 
@@ -28,7 +28,7 @@ definido para comparar contra el ISS (verificacion.md §4).
 |---|---|
 | `TP3/src/` | RTL sintetizable (Verilog-2001), un módulo por archivo |
 | `TP3/sim/` | testbenches autoverificables (`tb_*.v`), `prebuild.bat` y datos fijos (`data/`) |
-| `TP3/py/` | ensamblador, ISS, generador de vectores de prueba y sus tests |
+| `TP3/py/` | ensamblador, ISS, generador de vectores de prueba, protocolo y CLI para la placa, y sus tests |
 | `TP3/asm/` | programas de ejemplo, uno por característica |
 | `TP3/docs/` | esta documentación |
 
@@ -37,10 +37,11 @@ definido para comparar contra el ISS (verificacion.md §4).
 Desde la raíz del repo:
 
 ```
-.\sim.bat TP3 tb_cpu_core                        # un testbench (hay uno por módulo)
+.\sim.bat TP3 tb_cpu_core                        # un testbench (lista en verificacion.md)
 python -m unittest discover -s TP3/py -v         # tests de Python
 python TP3/py/assembler.py TP3/asm/loop.s        # ensamblar
 python TP3/py/iss.py TP3/asm/loop.s              # simular en el ISS
+python TP3/py/cli.py --port COM5                 # CLI con la placa conectada
 ```
 
 Detalles en verificacion.md §1 y herramientas.md.
@@ -53,7 +54,7 @@ Detalles en verificacion.md §1 y herramientas.md.
 | [modulos.md](modulos.md) | jerarquía y puertos de cada módulo |
 | [protocol.md](protocol.md) | protocolo UART: tramas, comandos, errores, formato exacto del volcado, ejemplos |
 | [verificacion.md](verificacion.md) | cómo se simula, solución de `$readmemh` (pre-build), qué cubre cada testbench, errores inyectados para validar los tests |
-| [herramientas.md](herramientas.md) | ensamblador, ISS (con modelo de ciclos), generador de vectores, programas de `asm/` |
+| [herramientas.md](herramientas.md) | ensamblador, ISS (con modelo de ciclos), generador de vectores, programas de `asm/`, CLI para la placa |
 
 ## Resumen de decisiones
 

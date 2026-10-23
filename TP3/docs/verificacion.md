@@ -1,8 +1,8 @@
 # TP3 - Verificación (simulación)
 
-Estado: **Fase 5 terminada**. El core, la Debug Unit y `system_top` están
-verificados, incluido el protocolo UART a nivel de bits serie. Los 24
-testbenches dan `SIM OK`.
+Estado: **Fase 6 terminada**. El core, la Debug Unit, `system_top` y la CLI
+del host están verificados. Los 24 testbenches dan `SIM OK` y los 74 tests de
+Python pasan.
 
 ## 1. Cómo se corre
 
@@ -11,7 +11,7 @@ Desde la raíz del repo:
 ```
 .\sim.bat TP3 <testbench>          # por ejemplo: .\sim.bat TP3 tb_cpu_core
 .\sim.bat TP3 <testbench> gui      # con formas de onda
-python -m unittest discover -s TP3/py -v    # tests de Python (fase 1)
+python -m unittest discover -s TP3/py -v    # tests de Python (fases 1 y 6)
 ```
 
 Cada testbench es autoverificable, según CLAUDE.md:
@@ -147,6 +147,8 @@ Además, en **cada ciclo** verifica que:
 
 El programa anterior queda en imem más allá del nuevo, así que OOR tiene que
 frenar la ejecución antes de llegar a él.
+
+Además escribe `core_trace.txt`, la traza que usa `test_hints_rtl.py` (§7.1).
 
 Programas (`cpu_tests.hex`, generado por `gen_vectors.py`; 104 en total):
 
@@ -348,8 +350,58 @@ En los submódulos, cada testbench detectó su error:
 - `dbg_tx_frame`: LEN_hi envía LEN_lo;
 - `dbg_state_src`: latencia 2 en vez de 3.
 
-## 7. Pendiente
+## 7. Fase 6: CLI del host
+
+Sin la placa conectada, la CLI se prueba contra un puerto serie simulado.
+
+| Archivo | Qué verifica | Tests |
+|---|---|---|
+| `test_protocol.py` | tramas de pedido y respuesta contra los ejemplos de protocol.md §7; `read_frame` con SOF, checksum o largo incorrectos; `decode_state` campo por campo (cada bit de control en su lugar, con payloads armados por un codificador independiente escrito desde los offsets de protocol.md §6); `DebugClient` con cada comando, cada código de error y respuestas inesperadas o faltantes | 10 |
+| `test_cli.py` | pistas del próximo ciclo, escenario por escenario (forwarding y su prioridad, load en EX/MEM, x0, load-use, `ebreak` detrás de un load, branch con operando forwardeado, bne no tomado, destino de jalr, jal en ID, slot de detención en el camino equivocado, códigos de detención); el render (burbujas, marcador HALT, OOR, cambios resaltados, alineación con colores); el shell completo contra una placa simulada con el ISS (`load`, `run`, `check`, una diferencia detectada, errores de la placa, `step n` que se detiene en HALT, `reset`, rutas de Windows) | 22 |
+| `test_hints_rtl.py` | pistas del próximo ciclo contra el RTL (7.1) | 1 |
+
+### 7.1 Pistas del próximo ciclo contra el RTL
+
+La CLI calcula en el host qué va a hacer el pipeline en el próximo ciclo. Si
+esa lógica se apartara del hardware, la CLI mostraría información falsa
+justo en modo step. Para evitarlo, `tb_cpu_core` escribe
+`build/TP3/tb_cpu_core/core_trace.txt`: en los primeros 300 ciclos de cada
+uno de sus 104 programas, el vector de debug y las decisiones reales del
+core (selección de forwarding, stall, redirect y destino, jal en ID y
+destino, aceptación de HALT).
+
+`test_hints_rtl.py` decodifica cada ciclo con `decode_state()` y exige que
+`next_cycle_events()` prediga exactamente lo que hizo el hardware. También
+valida `decode_state()` sobre bytes reales del RTL.
+
+Resultado: **14 718 ciclos coinciden**, entre ellos:
+- 1170 con forwarding;
+- 186 stalls de load-use;
+- 1758 flushes por salto tomado o jalr;
+- 613 jal en ID;
+- 63 slots de detención aceptados.
+
+El test se saltea si no existe la traza: hay que correr antes
+`.\sim.bat TP3 tb_cpu_core`.
+
+### 7.2 Errores inyectados
+
+- Contra la traza del RTL se detectaron tres errores en la lógica de pistas:
+  - prioridad de forwarding invertida;
+  - HALT aceptado en el camino equivocado;
+  - load-use que ignora rs2.
+- Un cuarto error (forwardear un load desde EX/MEM) **no** cambia ninguna
+  traza. Ese estado es inalcanzable en el hardware: el stall de load-use lo
+  impide, y `tb_cpu_core` verifica que nunca ocurre. Ese caso lo cubre el
+  test a mano `test_load_in_mem_is_not_forwarded`.
+- Los tests de la CLI encontraron un error real de la primera versión:
+  `load` partía el argumento con `shlex`, que se come las barras invertidas
+  de las rutas de Windows (`C:\Users\...` → `C:Users...`). Se corrigió, y
+  hay un test de regresión.
+
+## 8. Pendiente
 
 - Fase 7: confirmar en el reporte de utilización que `imem` y `dmem` se
   infieren como `RAMB36E1`, y `regfile` como flip-flops.
-- Fase 7: probar en la placa a 115200 baudios reales.
+- Fase 7: probar en la placa a 115200 baudios reales, con
+  `cli.py -c "load ..." -c run -c check` para cada programa de `asm/`.

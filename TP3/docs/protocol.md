@@ -1,6 +1,7 @@
 # TP3 - Protocolo UART entre el host y la Debug Unit
 
-Versión del protocolo: **1**. Estado: **Fase 0 - revisado**.
+Versión del protocolo: **1**. Diseñado en la fase 0; implementado en la
+Debug Unit (fase 5) y en `TP3/py/protocol.py` (fase 6).
 
 Este documento es **el único contrato** entre el host en Python (`TP3/py/`) y
 la Debug Unit en Verilog (`TP3/src/debug_unit*.v`). Si un lado necesita algo
@@ -88,7 +89,9 @@ def frame(sof, code, payload=b""):
   la trama se descarta y el parser vuelve a buscar `SOF`. El host debe enviar
   cada trama de corrido (un solo `serial.write()`).
 - Un byte con error de framing (stop bit en 0) aborta la trama en curso.
-- Ante un timeout de respuesta, el host espera > 10 ms y reenvía.
+- Ante un timeout de respuesta, el host puede esperar > 10 ms y reenviar.
+  `cli.py` no reintenta solo: informa el error y el usuario repite el
+  comando.
 
 **Alternativas:** un byte de escape o *byte stuffing* (SLIP/COBS) para que
 `SOF` sea único. Hace la resincronización inmediata, pero complica el
@@ -266,7 +269,7 @@ en IF/ID, además, `instr = 0x00000013`.
 | 8 | `valid` |
 
 Notas para el host:
-- Con el `pc` de cada etapa y el programa cargado, la TUI puede mostrar qué
+- Con el `pc` de cada etapa y el programa cargado, la CLI puede mostrar qué
   instrucción hay en cada etapa.
 - Con los `rd`/`rs`/`reg_write` de los registros puede deducir qué forwarding,
   stall o flush va a ocurrir en el próximo ciclo, sin que el hardware lo
@@ -307,8 +310,9 @@ la respuesta del RUN es `0x83` con un STATE de 204 bytes que contiene:
 | LOAD de 1024 palabras | 4101 + 7 | ~0,36 s |
 | STATE con dmem completa (4 KiB) | 4305 | ~0,37 s |
 
-Timeout sugerido en el host: 1 s para cualquier respuesta, RUN incluido (la
-ejecución dura como máximo 10 ms más la transmisión del STATE).
+Timeout en el host: alcanza con 1 s para cualquier respuesta, RUN incluido
+(la ejecución dura como máximo 10 ms más la transmisión del STATE). `cli.py`
+usa 2 s por defecto (`--timeout`).
 
 ## 9. Decisiones de diseño del protocolo
 
