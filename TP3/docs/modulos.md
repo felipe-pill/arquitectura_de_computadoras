@@ -1,10 +1,8 @@
 # TP3 - Módulos y puertos
 
-Estado: el core (`cpu_core` y sus submódulos) y las memorias están
-implementados en `TP3/src/`. La Debug Unit (sección 4, fase 5) y los topes
-(`system_top`, `basys3_top`, fase 7) todavía no; sus puertos son el contrato
-para esas fases, y las interfaces internas de la Debug Unit pueden ajustarse
-sin cambiar protocol.md.
+Estado: todo está implementado en `TP3/src/` salvo `basys3_top` (fase 7):
+el core y sus submódulos, las memorias, la UART (copiada de TP2), la Debug
+Unit y `system_top`.
 
 Convenciones (CLAUDE.md):
 - un módulo por archivo, nombre de archivo = nombre del módulo;
@@ -70,7 +68,12 @@ es `btn_reset | !mmcm_locked`.
 
 ### `system_top`
 Parámetros: `CLK_FREQ_HZ`, `BAUD`, `IMEM_ADDR_W`, `DMEM_ADDR_W`,
-`IMEM_INIT_FILE`, `IMEM_INIT_LEN`, `MAX_CYCLES`.
+`IMEM_INIT_FILE`, `IMEM_INIT_LEN`, `MAX_CYCLES`, `RX_TIMEOUT_CYCLES`
+(por defecto `CLK_FREQ_HZ/100` = 10 ms).
+
+Contiene `uart`, `debug_unit`, `cpu_core`, `imem` y `dmem`. El puerto A de
+`dmem` es del core, salvo mientras la Debug Unit lo borra (`dmem_clr`, con el
+core en reset): ese mux es un `assign` en este módulo.
 
 | Puerto | Dir | Ancho | Descripción |
 |---|---|---|---|
@@ -299,8 +302,8 @@ Sin flags: el branch usa un comparador propio.
 
 ## 4. `debug_unit`
 
-Parámetros: `CLK_FREQ_HZ`, `IMEM_ADDR_W`, `DMEM_ADDR_W`,
-`RX_TIMEOUT_CYCLES` (= `CLK_FREQ_HZ/100`, 10 ms).
+Parámetros: `IMEM_ADDR_W`, `DMEM_ADDR_W`, `IMEM_INIT_LEN` (largo del
+programa precargado, 0 = ninguno), `RX_TIMEOUT_CYCLES`.
 
 | Puerto | Dir | Ancho | Descripción |
 |---|---|---|---|
@@ -310,7 +313,7 @@ Parámetros: `CLK_FREQ_HZ`, `IMEM_ADDR_W`, `DMEM_ADDR_W`,
 | `tx_start` | out | 1 | |
 | `tx_data` | out | 8 | |
 | `tx_busy` | in | 1 | |
-| `core_rst`, `core_en` | out | 1 c/u | |
+| `core_rst`, `core_en` | out | 1 c/u | `core_rst`: el reset de placa o el de `dbg_ctrl`; `core_en = running \| step_pulse` |
 | `imem_limit` | out | `IMEM_ADDR_W+1` | `prog_len` |
 | `halted`, `halting` | in | 1 c/u | |
 | `halt_reason` | in | 3 | |
@@ -329,33 +332,53 @@ Parámetros: `CLK_FREQ_HZ`, `IMEM_ADDR_W`, `DMEM_ADDR_W`,
 | `dmem_b_rdata` | in | 32 | |
 | `running` | out | 1 | para LEDs |
 
-Submódulos (las interfaces internas pueden refinarse en la fase 5):
+Submódulos:
 
-- **`dbg_rx_frame`**: busca el SOF `0xA5`, lee CMD y LEN, entrega el payload
-  byte a byte (`pl_valid`, `pl_byte`) y al final informa `frame_end` y
-  `frame_ok` (checksum).
-  - Aborta en silencio si pasan `RX_TIMEOUT_CYCLES` sin bytes a mitad de
-    trama o si llega un byte con `rx_ferr`.
-  - También entrega `hdr_valid`, `hdr_cmd` y `hdr_len` apenas termina el
-    encabezado, para que LOAD pueda escribir en imem mientras llegan los
-    bytes.
-- **`dbg_tx_frame`**: con `start`, `rsp_code` y `rsp_len`, envía SOF `0x5A`,
-  código, LEN, el payload y el checksum.
-  - Pide cada byte del payload a una fuente con `src_req`/`src_idx` y espera
-    `src_valid`/`src_byte` (latencia variable: la dmem tarda 1 ciclo).
-  - Respeta que `tx_busy` sube un ciclo después de `tx_start`.
-- **`dbg_state_src`**: según el modo (STATE o payload corto), traduce
-  `src_idx` al byte correspondiente. Lee el bloque de estado, `dbg_core_vec`,
-  el banco (`dbg_reg_addr`) y la dmem (`dmem_b_addr`).
-- **`dbg_ctrl`**: FSM de comandos, con estados IDLE, LOAD, RESET (barrido de
-  borrado), RUN, STEP y SEND.
-  - Maneja `core_rst`, `core_en`, `prog_len`, `prog_valid` y `dmem_used`.
-  - Durante RUN no atiende comandos: las tramas que llegan se descartan.
-  - Valida estado y longitud y elige el código de respuesta.
+- **`dbg_rx_frame`** (parámetro `TIMEOUT_CYCLES`): busca el SOF `0xA5` y lee
+  CMD y LEN.
+  - Apenas termina el encabezado pulsa `hdr_valid`, con `cmd` y `len`
+    estables hasta la trama siguiente. Así LOAD puede escribir en imem
+    mientras llegan los bytes.
+  - Entrega el payload byte a byte (`pl_valid`, `pl_byte`).
+  - Al final pulsa `frame_end`, con `frame_ok` = checksum correcto.
+  - Si pasan `TIMEOUT_CYCLES` sin bytes a mitad de trama, o llega un byte con
+    `rx_ferr`, pulsa `abort` y vuelve a buscar SOF.
+- **`dbg_tx_frame`**: con `start`, `rsp` y `len`, envía `5A RSP LEN_lo LEN_hi
+  PAYLOAD CHK`.
+  - Pide cada byte del payload con `src_req`/`src_idx` y espera
+    `src_valid`/`src_byte` (cualquier latencia).
+  - Usa el handshake de `uart_tx` de TP2: `tx_start` solo con `!tx_busy`;
+    `tx_busy` sube un ciclo después.
+  - Pulsa `done` al terminar.
+- **`dbg_state_src`**: traduce un índice de byte al byte del payload, con
+  latencia fija de 3 ciclos.
+  - En modo STATE lee el bloque de estado, `dbg_core_vec`, el banco
+    (`dbg_reg_addr`) y la dmem (`dmem_b_addr`, lectura síncrona).
+  - En modo corto devuelve `short_data`: la cantidad de palabras de LOAD o el
+    comando en un error.
+- **`dbg_ctrl`**: FSM de comandos (protocol.md §4-5).
+  - **Secuencia de reset** (estados `S_CLR_*`): core en reset, barrido de
+    borrado de dmem, `dmem_used = 0` y liberación 2 ciclos después. La usan
+    RESET, LOAD y también el reset de placa, así que al encender la dmem
+    queda en cero.
+  - **Decodificación:** solo atiende tramas cuyo encabezado llega en
+    `S_IDLE`; todo lo que llega ocupado (incluido RUN) se descarta. El orden
+    de chequeo es checksum, comando conocido, LEN y estado; LOAD valida LEN
+    al recibir el encabezado.
+  - **LOAD:** arma cada palabra little-endian, la escribe en imem y al final
+    valida el checksum. Si falla, `prog_valid = 0`.
+  - **RUN:** `core_en = 1` hasta `halted`.
+  - **STEP:** un pulso de `core_en`, y el largo de la respuesta se calcula un
+    ciclo después (`S_STEP_LEN`), cuando `dmem_used` ya incluye un store de
+    ese paso.
+  - Mantiene `prog_len`, `prog_valid` y `dmem_used` (high-water mark
+    espiando las escrituras del core).
 
 ## 5. Testbenches (`TP3/sim/`)
 
-Hay uno por módulo del core, más `tb_cpu_core` (programas completos contra el
-ISS); todos están descriptos en verificacion.md. Faltan los de la Debug Unit y
-`tb_system_top` (fase 5: tramas serie reales, verifica los bytes del
-volcado).
+Hay uno por módulo: los del core, `tb_cpu_core` y `tb_cpu_step` (programas
+completos contra el ISS), `tb_uart_loopback` (copiado de TP2), los de los
+submódulos de la Debug Unit y `tb_system_top` (tramas serie reales). Todos
+están descriptos en verificacion.md. `dbg_ctrl` y `debug_unit` no tienen
+testbench propio: su comportamiento está definido a nivel de protocolo, y
+`tb_system_top` lo verifica byte a byte (verificacion.md §6).

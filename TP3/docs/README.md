@@ -13,7 +13,7 @@ por UART, para la Basys 3. La especificación completa está en
 | 2 | Módulos del datapath (ALU, banco de registros, decoder, memorias, ...) | hecha |
 | 3 | Pipeline completo: forwarding, load-use, saltos, **HALT y drenaje** | hecha |
 | 4 | Modo step, enable global y reset (verificación, sin cambios de RTL) | hecha |
-| 5 | Debug Unit y protocolo UART, con testbench a nivel de bits serie | pendiente |
+| 5 | Debug Unit y protocolo UART, con testbench a nivel de bits serie | hecha |
 | 6 | CLI/TUI en Python | pendiente |
 | 7 | Tope de placa, constraints, build, timing, frecuencia del MMCM | pendiente |
 | 8 | Documentación final y respuestas a las preguntas de SPEC §8 | pendiente |

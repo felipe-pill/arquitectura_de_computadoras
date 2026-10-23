@@ -1,8 +1,8 @@
 # TP3 - Arquitectura del procesador RV32I segmentado + Debug Unit
 
-Estado: diseño revisado en la fase 0 e implementado en las fases 2-4 (el
-core). La Debug Unit (fase 5) y el tope de placa (fase 7) todavía no están
-implementados. El estado de cada fase está en [README.md](README.md).
+Estado: diseño revisado en la fase 0 e implementado en las fases 2-5 (core,
+Debug Unit y `system_top`). El tope de placa (fase 7) todavía no está
+implementado. El estado de cada fase está en [README.md](README.md).
 
 Documentos relacionados:
 - [modulos.md](modulos.md): lista de módulos con sus puertos.

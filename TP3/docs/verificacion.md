@@ -1,8 +1,8 @@
 # TP3 - Verificación (simulación)
 
-Estado: **Fase 4 terminada**. El core completo (`cpu_core`) y cada uno de sus
-módulos tienen testbench, el modo step está verificado contra la ejecución
-continua, y los 19 testbenches dan `SIM OK`.
+Estado: **Fase 5 terminada**. El core, la Debug Unit y `system_top` están
+verificados, incluido el protocolo UART a nivel de bits serie. Los 24
+testbenches dan `SIM OK`.
 
 ## 1. Cómo se corre
 
@@ -262,8 +262,94 @@ se nota: un volcado mostraría el registro ya escrito con su instrucción
 todavía en WB, un paso antes. Por eso se agregó el chequeo del banco de
 registros durante los ciclos congelados, y con él el error se detecta.
 
-## 6. Pendiente
+## 6. Fase 5: Debug Unit y protocolo UART
 
-- Fase 5: Debug Unit y protocolo, con un testbench a nivel de bits serie.
+La UART de TP2 (`uart`, `uart_baudgen`, `uart_rx`, `uart_tx`) se copió sin
+cambios, junto con su testbench `tb_uart_loopback`, que pasa en TP3.
+
+### 6.1 Testbenches de los submódulos (nivel de byte, sin UART)
+
+| Testbench | Módulo | Qué verifica | Checks |
+|---|---|---|---|
+| `tb_dbg_rx_frame` | `dbg_rx_frame` | ejemplos de protocol.md §7, checksum malo, basura antes del SOF, `A5` dentro del payload, timeout entre bytes (y una pausa justo por debajo del límite), error de framing en una trama y en reposo, 300 tramas aleatorias (comando, largo 0-39, payload, pausas y corrupción aleatorios) | 310 |
+| `tb_dbg_tx_frame` | `dbg_tx_frame` | tramas con payload de 0, 1, 2, 17, 204 y 300 bytes contra un modelo del handshake de `uart_tx` (busy aleatorio) y una fuente de bytes con latencia aleatoria: bytes, orden de pedidos, checksum, `done` una sola vez, nunca `tx_start` con `tx_busy` | 6 |
+| `tb_dbg_state_src` | `dbg_state_src` | cada byte de un STATE completo y 500 índices al azar contra un modelo del layout de protocol.md §6, latencia exacta de 3 ciclos, modo corto | 770 |
+
+### 6.2 `tb_system_top`: protocolo con bits serie reales
+
+El testbench maneja `uart_rxd` bit a bit (8N1) y decodifica `uart_txd`.
+Para que la simulación sea rápida, la UART corre a `CLK_FREQ/32` baudios
+(`DIV = 2`, 32 ciclos por bit). La lógica de bits es la misma que a 115200,
+que ya cubren TP2 y `tb_uart_loopback`.
+
+Los STATE esperados salen de un **core de referencia**: otro `cpu_core` con
+sus memorias, manejado directamente (un pulso de `en` por STEP, `en` hasta
+`halted` en RUN, reset y borrado en RESET y LOAD). Cada respuesta STATE tiene
+que ser **idéntica byte a byte** al volcado armado desde ese core, y el
+resultado final de cada RUN se compara además con el ISS.
+
+Qué cubre:
+- **Encendido:** DUMP con todo en cero y sin programa.
+- **Errores y orden de chequeo:**
+  - STEP/RUN sin programa → `ERR_NO_PROGRAM`;
+  - comando desconocido → `ERR_UNKNOWN_CMD`;
+  - checksum malo → `ERR_CHECKSUM`, también con un LEN inválido o un comando
+    desconocido, porque el checksum se chequea primero;
+  - LEN inválido en DUMP, RUN y LOAD (6 y 0 bytes) → `ERR_LENGTH`;
+  - RUN/STEP con el core detenido → `ERR_HALTED`.
+- **Programas:**
+  - `load_use` y `jumps` **paso a paso hasta el final** (22 STEP cada uno,
+    cada STATE comparado);
+  - `alu`, `no_halt`, `random_05` con algunos STEP y después RUN;
+  - `branches`, `illegal`, `random_17` con RUN directo.
+- **RESET a mitad de programa** (`loadstore`): 7 STEP, RESET, DUMP, 2 STEP,
+  RUN, y otro RESET + RUN completo. Los STEP de `loadstore` incluyen stores,
+  así que el largo de la respuesta (`dmem_used`) cambia entre pasos.
+- **Trama durante RUN:** con `timeout_loop` se envía un DUMP mientras corre.
+  La respuesta del RUN llega (TIMEOUT, 3005 ciclos, igual que el ISS) y el
+  DUMP no recibe respuesta.
+- **LOAD con checksum malo:** `ERR_CHECKSUM`; después RUN da
+  `ERR_NO_PROGRAM` y DUMP muestra `prog_valid = 0`.
+- **Timeout entre bytes y error de framing:** la trama incompleta no recibe
+  respuesta y la siguiente funciona.
+- **Al final:** no quedan bytes inesperados y no hubo errores de framing en
+  `uart_txd`.
+
+Resultado: **150 checks, todos correctos**: 94 respuestas STATE comparadas
+byte a byte con el core de referencia y 11 resultados finales comparados con
+el ISS.
+
+`dbg_ctrl` y `debug_unit` no tienen testbench propio: su comportamiento es
+el protocolo, y `tb_system_top` lo verifica de punta a punta.
+
+### 6.3 Errores inyectados
+
+Contra `tb_system_top`, uno a la vez, todos detectados:
+
+| Error inyectado | Primera falla detectada |
+|---|---|
+| largo de la respuesta de STEP calculado antes del store de ese paso | `load_use/step`: largo 204 en vez de 208 |
+| checksum no chequeado primero | `dump_bad_chk`: respondió STATE en vez de `ERR_CHECKSUM` |
+| sin `ERR_HALTED` | `load_use/run_halted` |
+| un LOAD con checksum malo deja un programa válido | `after_bad_load/run` |
+| palabras de LOAD armadas big-endian | `load_use/step`: instrucción en IF/ID |
+| RESET no limpia `dmem_used` | `jumps/dump`: largo 212 en vez de 204 |
+| sin timeout entre bytes | `rx_timeout/dump`: sin respuesta |
+| registros enviados big-endian | `load_use/step`: byte 80 |
+| checksum de respuesta incluye el SOF | `power_on/dump`: checksum malo |
+| flags `halted` y `halting` invertidos | `load_use/step`: byte 0 |
+
+El primero es un error real que tuvo la primera versión de `dbg_ctrl` (se
+corrigió agregando el estado `S_STEP_LEN` antes de correr los tests); el test
+lo detecta.
+
+En los submódulos, cada testbench detectó su error:
+- `dbg_rx_frame`: el checksum ignora el byte CHK;
+- `dbg_tx_frame`: LEN_hi envía LEN_lo;
+- `dbg_state_src`: latencia 2 en vez de 3.
+
+## 7. Pendiente
+
 - Fase 7: confirmar en el reporte de utilización que `imem` y `dmem` se
   infieren como `RAMB36E1`, y `regfile` como flip-flops.
+- Fase 7: probar en la placa a 115200 baudios reales.
