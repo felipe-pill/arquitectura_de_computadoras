@@ -1,6 +1,8 @@
 # TP3 - Arquitectura del procesador RV32I segmentado + Debug Unit
 
-Estado: **Fase 0 (diseño) - revisado**. No hay RTL todavía.
+Estado: diseño revisado en la fase 0 e implementado en las fases 2-4 (el
+core). La Debug Unit (fase 5) y el tope de placa (fase 7) todavía no están
+implementados. El estado de cada fase está en [README.md](README.md).
 
 Documentos relacionados:
 - [modulos.md](modulos.md): lista de módulos con sus puertos.
@@ -692,8 +694,9 @@ estable mientras se transmite. Si `halted` ya vale 1, STEP responde
 **Propiedad clave:** el core ve la misma secuencia de flancos habilitados en
 modo continuo y en modo step. Por lo tanto el estado tras *k* pasos es
 idéntico al estado tras *k* ciclos de ejecución continua, incluidos stalls,
-flushes y contadores. Se puede mezclar: avanzar unos pasos y después RUN. Los
-testbenches de la fase 5 lo verifican comparando ambos caminos.
+flushes y contadores. Se puede mezclar: avanzar unos pasos y después RUN.
+`tb_cpu_step` lo verifica ciclo a ciclo con todos los programas de prueba
+(verificacion.md §5).
 
 **Alternativas:** step por instrucción (avanzar hasta que se retire una
 instrucción): SPEC pide explícitamente un ciclo por comando. Step con conteo N

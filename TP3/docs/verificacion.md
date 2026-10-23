@@ -1,7 +1,8 @@
 # TP3 - Verificación (simulación)
 
-Estado: **Fase 3 terminada**. El core completo (`cpu_core`) y cada uno de sus
-módulos tienen testbench, y todos dan `SIM OK`.
+Estado: **Fase 4 terminada**. El core completo (`cpu_core`) y cada uno de sus
+módulos tienen testbench, el modo step está verificado contra la ejecución
+continua, y los 19 testbenches dan `SIM OK`.
 
 ## 1. Cómo se corre
 
@@ -203,10 +204,66 @@ primer programa que falló en el orden de ejecución (alfabético: `alu`,
 | `ex_mem_reg` | `en` ignorado | `tb_ex_mem_reg` |
 | `mem_wb_reg` | el reset no limpia el control | `tb_mem_wb_reg` |
 
-## 5. Pendiente
+## 5. Fase 4: modo step, enable global y reset
 
-- Fase 4: modo step (`en` pulsado ciclo a ciclo) con el mismo resultado y la
-  misma cuenta de ciclos que la ejecución continua, y recarga de programas.
+SPEC asigna a esta fase HALT y drenaje, enable global y step, e imem
+escribible. HALT y drenaje se hicieron en la fase 3 (§4). La imem escribible
+ya está probada en `tb_imem` (puerto de escritura) y en `tb_cpu_core`, que
+carga un programa nuevo en cada test sin borrar el anterior. Lo que faltaba
+era verificar el enable: **en esta fase no cambió el RTL**, solo se agregó
+`tb_cpu_step`.
+
+### 5.1 `tb_cpu_step`
+
+Usa los mismos 104 programas de `cpu_tests.hex` y corre cada uno tres veces:
+
+1. **Continua (`en = 1`), grabando una traza:** el vector de debug completo
+   (PC y los cuatro registros de pipeline) después de cada flanco, y la
+   escritura en dmem de cada flanco.
+2. **Con `en` aleatorio** (proporción de ciclos habilitados 1/2, 1/4 o 3/4,
+   o alternado, según el programa):
+   - en cada flanco habilitado, la escritura en dmem y el estado resultante
+     tienen que ser **idénticos a la traza continua en la misma cuenta de
+     ciclos**;
+   - en cada flanco deshabilitado no puede cambiar nada: ni el estado, ni
+     `cycle_cnt`, ni la dirección de imem (queda en el PC), y no puede haber
+     enable ni escritura en dmem ni escritura en el banco de registros (se
+     verifica el registro destino de MEM/WB y uno rotativo);
+   - una vez `halted`, 8 ciclos más con `en = 1` no cambian nada;
+   - el estado final coincide con el ISS: registros, las 1024 palabras de
+     dmem, PC, ciclos y motivo.
+3. **Reset a mitad de ejecución:** corre continuo un número aleatorio de
+   ciclos, aplica un reset como el comando RESET (programa conservado, dmem
+   borrada) y vuelve a correr completo. El estado final coincide con el ISS,
+   así que el reset deja el core limpio desde cualquier estado del pipeline.
+
+Resultado: **104 programas, 823 618 checks, todos correctos.** El modo step
+es equivalente a la ejecución continua ciclo a ciclo, no solo en el
+resultado final.
+
+### 5.2 Errores inyectados
+
+| Error inyectado | Primera falla detectada |
+|---|---|
+| escritura del banco de registros sin `en` | registro escrito con `en = 0` |
+| enable de lectura de dmem sin `en` | dmem habilitada con `en = 0` |
+| escritura en dmem sin `en` | dmem habilitada con `en = 0` |
+| next-PC (dirección de imem) sin `en` | dirección de imem movida con `en = 0` |
+| `halt_ctrl` sin `en` | `cycle_cnt` cambió con `en = 0` |
+| `halted` no bloquea `en` | el estado cambió después de `halted` |
+| IF/ID sin `en` | el estado cambió con `en = 0` |
+| el reset no limpia el banco de registros | el estado difiere de la ejecución continua |
+
+El primero sobrevivió a la primera versión del testbench. Mientras el core
+está congelado, MEM/WB tiene la misma instrucción, así que el error escribe
+**el mismo valor en el mismo registro** en cada flanco: el estado final es
+idéntico y la traza de los registros de pipeline también. Pero en modo step
+se nota: un volcado mostraría el registro ya escrito con su instrucción
+todavía en WB, un paso antes. Por eso se agregó el chequeo del banco de
+registros durante los ciclos congelados, y con él el error se detecta.
+
+## 6. Pendiente
+
 - Fase 5: Debug Unit y protocolo, con un testbench a nivel de bits serie.
 - Fase 7: confirmar en el reporte de utilización que `imem` y `dmem` se
   infieren como `RAMB36E1`, y `regfile` como flip-flops.

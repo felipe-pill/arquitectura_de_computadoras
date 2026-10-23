@@ -1,8 +1,10 @@
 # TP3 - Módulos y puertos
 
-Estado: **Fases 0-3: el core está implementado (`TP3/src/`)**; la Debug Unit y los topes son de las fases 4-7. Los nombres y anchos son el
-contrato para las fases 2-5. Los submódulos de la Debug Unit (sección 4)
-pueden ajustarse en la fase 5 sin cambiar protocol.md.
+Estado: el core (`cpu_core` y sus submódulos) y las memorias están
+implementados en `TP3/src/`. La Debug Unit (sección 4, fase 5) y los topes
+(`system_top`, `basys3_top`, fase 7) todavía no; sus puertos son el contrato
+para esas fases, y las interfaces internas de la Debug Unit pueden ajustarse
+sin cambiar protocol.md.
 
 Convenciones (CLAUDE.md):
 - un módulo por archivo, nombre de archivo = nombre del módulo;
