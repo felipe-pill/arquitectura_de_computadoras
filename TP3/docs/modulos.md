@@ -1,8 +1,8 @@
 # TP3 - Módulos y puertos
 
-Estado: todo está implementado en `TP3/src/` salvo `basys3_top` (fase 7):
-el core y sus submódulos, las memorias, la UART (copiada de TP2), la Debug
-Unit y `system_top`.
+Estado: todo está implementado en `TP3/src/`: el core y sus submódulos, las
+memorias, la UART (copiada de TP2), la Debug Unit, `system_top` y el tope de
+placa `basys3_top` (fase 7).
 
 Convenciones (CLAUDE.md):
 - un módulo por archivo, nombre de archivo = nombre del módulo;
@@ -63,9 +63,20 @@ puerto A de dmem (core o borrado de la Debug Unit) es un `assign` en
 | `uart_txd` | out | 1 | FPGA → PC (A18) |
 | `led` | out | 16 | `[0]` running, `[1]` halting, `[2]` halted, `[5:3]` halt_reason, resto 0 |
 
-Contiene: MMCM (fase 7; se prefiere la primitiva `MMCME2_BASE` instanciada
-directamente, sin `.xci`) y el sincronizador 2FF con init `2'b11`. Su reset
-es `btn_reset | !mmcm_locked`.
+Parámetros: `BOARD_CLK_HZ` (100 MHz), `MMCM_MULT` (17), `MMCM_DIVCLK` (2),
+`MMCM_OUT_DIV` (9), `BAUD`, `LED_W`. La frecuencia del sistema es
+`BOARD_CLK_HZ · MMCM_MULT / (MMCM_DIVCLK · MMCM_OUT_DIV)` = 94,444 MHz y se
+pasa a `system_top` como `CLK_FREQ_HZ`.
+
+Contiene:
+- la primitiva `MMCME2_BASE` instanciada directamente, sin `.xci`, con su
+  salida y la realimentación (`CLKFBOUT → CLKFBIN`) a través de un `BUFG`
+  cada una (timing.md §1);
+- el sincronizador 2FF (`ASYNC_REG`) con init `2'b11`, cuya entrada es
+  `btn_reset | !mmcm_locked`.
+
+No tiene testbench: las primitivas de Xilinx no se simulan (SPEC §4); se
+prueba en la placa (timing.md §7).
 
 ### `system_top`
 Parámetros: `CLK_FREQ_HZ`, `BAUD`, `IMEM_ADDR_W`, `DMEM_ADDR_W`,
@@ -369,11 +380,14 @@ Submódulos:
   - **LOAD:** arma cada palabra little-endian, la escribe en imem y al final
     valida el checksum. Si falla, `prog_valid = 0`.
   - **RUN:** `core_en = 1` hasta `halted`.
-  - **STEP:** un pulso de `core_en`, y el largo de la respuesta se calcula un
-    ciclo después (`S_STEP_LEN`), cuando `dmem_used` ya incluye un store de
-    ese paso.
+  - **STEP:** un pulso de `core_en`, y el largo de la respuesta se calcula
+    dos ciclos después (`S_STEP_HWM`, `S_STEP_LEN`), cuando `dmem_used` ya
+    incluye un store de ese paso.
   - Mantiene `prog_len`, `prog_valid` y `dmem_used` (high-water mark
-    espiando las escrituras del core).
+    espiando las escrituras del core). La escritura espiada se registra
+    primero (`hwm_we`, `hwm_addr`) y `dmem_used` se actualiza un ciclo
+    después, para no alargar el camino crítico del core
+    (arquitectura.md §4.4.1).
 
 ## 5. Testbenches (`TP3/sim/`)
 

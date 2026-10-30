@@ -195,7 +195,7 @@ python TP3/py/cli.py --port COM5 -c "load TP3/asm/loop.s" -c run -c check
 Opciones:
 - `--baud` (115200);
 - `--timeout`: segundos por respuesta, 2 por defecto (un RUN dura como
-  máximo 10 ms más la transmisión);
+  máximo ~10,6 ms a 94,4 MHz, más la transmisión);
 - `--max-cycles`: el `MAX_CYCLES` del bitstream, para `check`;
 - `--no-color`.
 

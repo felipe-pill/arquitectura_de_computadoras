@@ -1,8 +1,9 @@
 # TP3 - Arquitectura del procesador RV32I segmentado + Debug Unit
 
 Estado: diseño revisado en la fase 0 e implementado en las fases 2-5 (core,
-Debug Unit y `system_top`). El tope de placa (fase 7) todavía no está
-implementado. El estado de cada fase está en [README.md](README.md).
+Debug Unit y `system_top`). El tope de placa, el build y el análisis de
+timing (fase 7) están en [timing.md](timing.md). El estado de cada fase está
+en [README.md](README.md).
 
 Documentos relacionados:
 - [modulos.md](modulos.md): lista de módulos con sus puertos.
@@ -122,7 +123,7 @@ flip-flops explícitos.
 | `XLEN` | 32 | RV32I |
 | `IMEM_ADDR_W` | 10 | 1024 palabras = 4 KiB = 1 RAMB36 |
 | `DMEM_ADDR_W` | 10 | 1024 palabras = 4 KiB = 1 RAMB36 |
-| `CLK_FREQ_HZ` | 100 000 000 | se ajusta en la fase 7 según el MMCM |
+| `CLK_FREQ_HZ` | 100 000 000 | valor por defecto de `system_top` (testbenches); en la placa, `basys3_top` le pasa la frecuencia del MMCM: 94 444 444 (timing.md §5) |
 | `BAUD` | 115 200 | 8N1, igual que TP2 |
 | `MAX_CYCLES` | 1 000 000 | límite de ciclos desde el reset (sección 5.4) |
 
@@ -421,7 +422,8 @@ distribuida (LUTRAM) con lectura asíncrona.
   configurado a mano, más de dos puertos).
 
 En la fase 7 se verifica en el reporte de utilización que Vivado haya inferido
-`RAMB36E1` y no LUTRAM.
+`RAMB36E1` y no LUTRAM. Confirmado: 2 RAMB36E1 y ninguna LUTRAM
+(timing.md §3).
 
 LUTRAM (lectura asíncrona) permitiría un pipeline "de libro", sin pensar en la
 latencia. A cambio, 2 × 4 KiB consumen ~1000 LUTs más multiplexores, son más
@@ -466,7 +468,9 @@ consume el dato, y todos los registros de pipeline son flip-flops explícitos.
 **Por qué:** cumple SPEC §3 al pie de la letra ("BRAM with the address taken
 from next-PC") y deja los cuatro registros de pipeline como flip-flops reales,
 fáciles de resetear, vaciar y leer desde la Debug Unit. La desventaja (setup
-de la BRAM al final del camino de EX) se mide en la fase 7.
+de la BRAM al final del camino de EX) se mide en la fase 7. Resultado: los
+caminos críticos terminan justamente en pines de las BRAM (dirección de la
+imem o write-enable de la dmem), ver timing.md §4.
 
 ### 4.3 Puertos de cada memoria
 
@@ -499,6 +503,58 @@ protocolo sigue siendo un bloque contiguo sin direcciones. El bitmap necesita
 otra memoria y un formato con direcciones; enviar todo cuesta ~0,36 s por
 volcado a 115200, lo que molesta en modo step. Limitación conocida: un
 programa que escribe solo en una dirección alta provoca un volcado grande.
+
+#### 4.4.1 Actualización un ciclo después (fase 7)
+
+**El problema:** la dmem es BRAM síncrona, así que el core le entrega la
+dirección y el write-enable de un store **desde la etapa EX** (salen
+combinacionalmente de la ALU), un ciclo antes de que el store esté en MEM. La
+primera versión del high-water mark espiaba esas mismas señales y comparaba
+en el mismo ciclo, así que el camino crítico del procesador seguía de largo
+hasta la Debug Unit:
+
+    EX/MEM o MEM/WB → forwarding → ALU → dirección → +1 → comparación → enable de dmem_used
+
+El primer build a 100 MHz falló por ese camino: **WNS = −1,091 ns**, con 81
+endpoints fallidos, todos en `dmem_used`, y 14 niveles de lógica. Un circuito
+que solo sirve para depurar limitaba la frecuencia del procesador.
+
+**Decisión:** la Debug Unit primero registra la escritura del core
+(`hwm_we`, `hwm_addr`: 11 flip-flops) y actualiza `dmem_used` en el ciclo
+siguiente. STEP espera un ciclo más (estado `S_STEP_HWM`) antes de calcular
+el largo de la respuesta.
+
+**Alternativas:**
+- Dejarlo como estaba y bajar el reloj a ~90 MHz. El camino crítico que se
+  documenta sería el de la Debug Unit y no el del procesador.
+- Tomar el store desde el registro EX/MEM en vez de espiar el puerto de la
+  BRAM. El efecto en el timing es el mismo, pero hay que sacar puertos nuevos
+  del core solo para depuración.
+
+**Por qué es seguro el retraso:** `dmem_used` solo se lee con el core
+detenido.
+- **RUN:** el marcador HALT viene detrás del store (como mucho está en ID
+  cuando el store está en EX), así que `halted` sube al menos 3 flancos
+  después del store, y el largo se lee un flanco más tarde. El contador ya
+  está actualizado desde mucho antes.
+- **DUMP, LOAD y RESET:** solo arrancan desde `S_IDLE`, con el core quieto.
+- **STEP** es el único caso justo: el largo se leía en el flanco siguiente al
+  paso, que es justo cuando ahora se actualiza el contador. Por eso el estado
+  extra. La respuesta de STEP sale un ciclo (~10 ns) más tarde, algo
+  irrelevante frente a los ~19 ms de la transmisión por UART.
+
+**Resultado** (100 MHz, mismo flujo de build):
+
+| | Antes | Después |
+|---|---|---|
+| WNS | −1,091 ns | −0,102 ns |
+| Endpoints fallidos | 81 | 1 |
+| Niveles de lógica del peor camino | 14 | 11 |
+| Fin del peor camino | `dmem_used` (Debug Unit) | write-enable de la dmem (core) |
+
+Ahora el camino crítico es del core (EX/MEM → forwarding → ALU → byte-enable
+del store → `WEA` de la dmem). Los 24 testbenches pasan. Si se quita
+`S_STEP_HWM`, `tb_system_top` falla (verificacion.md §6.3).
 
 ### 4.5 Contenido inicial
 
@@ -623,7 +679,8 @@ Dos salvaguardas independientes:
    (`prog_len = 0`), el primer fetch ya es OOR.
 2. **TIMEOUT:** un contador de ciclos habilitados `cycle_cnt` de 32 bits.
    Cuando `cycle_cnt >= MAX_CYCLES` (parámetro, por defecto 1 000 000 =
-   10 ms a 100 MHz), el siguiente fetch se convierte en slot de detención.
+   10 ms a 100 MHz, 10,6 ms a los 94,4 MHz de la placa), el siguiente fetch
+   se convierte en slot de detención.
    Cubre los bucles infinitos dentro del programa. Los programas de prueba
    duran cientos de ciclos, así que el margen es enorme; los testbenches
    pueden bajar el parámetro para probar el TIMEOUT rápido.
@@ -758,7 +815,7 @@ Con flip-flops son 1024 FFs (de 41 600 disponibles) y ~3 mux 32:1 × 32 bits.
 
 | Origen | Uso en TP3 |
 |---|---|
-| `TP2/src/uart_baudgen.v`, `uart_rx.v`, `uart_tx.v`, `uart.v` | se copian **sin cambios**. Divisor entero: a 100 MHz, DIV = 54, error de baudios +0,47 %. Si en la fase 7 el MMCM cambia la frecuencia, se recalcula el error; con más de ~2 % se cambia a un divisor fraccional (acumulador). |
+| `TP2/src/uart_baudgen.v`, `uart_rx.v`, `uart_tx.v`, `uart.v` | se copian **sin cambios**. Divisor entero: a 100 MHz, DIV = 54, error de baudios +0,47 %. Si en la fase 7 el MMCM cambia la frecuencia, se recalcula el error; con más de ~2 % se cambia a un divisor fraccional (acumulador). Resultado: en la placa (94,444 MHz) DIV = 51 y el error también es +0,47 %, así que no hizo falta (timing.md §5). |
 | `TP2/src/basys3_uart_alu.v` | se reutiliza el patrón de sincronizador de reset y el manejo de `tx_busy` (que sube un ciclo después de `tx_start`) |
 | `TP2/py/*.py` | base de pyserial para la CLI (abrir puerto, `reset_input_buffer`, timeouts) |
 | `TP1/src/myALU.v` (SPEC lo llama `my_ALU.v`) | **no se reutiliza tal cual**: es de 8 bits, registra sus operandos internamente, usa opcodes estilo MIPS y le faltan sll, slt y sltu. Se reutiliza la idea (case por operación, `$signed` para sra) en una ALU combinacional nueva de 32 bits. |

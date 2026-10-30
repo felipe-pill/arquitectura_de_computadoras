@@ -331,6 +331,7 @@ Contra `tb_system_top`, uno a la vez, todos detectados:
 | Error inyectado | Primera falla detectada |
 |---|---|
 | largo de la respuesta de STEP calculado antes del store de ese paso | `load_use/step`: largo 204 en vez de 208 |
+| sin el estado `S_STEP_HWM` (fase 7: `dmem_used` se actualiza un ciclo después) | `load_use/step`: largo 204 en vez de 208; falla 3 checks, también `loadstore/step` (204 en vez de 464) |
 | checksum no chequeado primero | `dump_bad_chk`: respondió STATE en vez de `ERR_CHECKSUM` |
 | sin `ERR_HALTED` | `load_use/run_halted` |
 | un LOAD con checksum malo deja un programa válido | `after_bad_load/run` |
@@ -399,9 +400,19 @@ El test se saltea si no existe la traza: hay que correr antes
   de las rutas de Windows (`C:\Users\...` → `C:Users...`). Se corrigió, y
   hay un test de regresión.
 
-## 8. Pendiente
+## 8. Fase 7: síntesis y placa
 
-- Fase 7: confirmar en el reporte de utilización que `imem` y `dmem` se
-  infieren como `RAMB36E1`, y `regfile` como flip-flops.
-- Fase 7: probar en la placa a 115200 baudios reales, con
-  `cli.py -c "load ..." -c run -c check` para cada programa de `asm/`.
+- **Utilización:** `imem` y `dmem` se infieren como `RAMB36E1` (sin
+  LUTRAM) y `regfile` como 992 flip-flops (timing.md §3).
+- **Simulación:** los 24 testbenches pasan con el cambio de `dbg_ctrl` de
+  arquitectura.md §4.4.1, y quitar el estado nuevo hace fallar
+  `tb_system_top` (§6.3). `basys3_top` no se simula (primitivas de Xilinx).
+- **Placa** a 115200 baudios reales, con
+  `cli.py -c "load ..." -c run -c check` para cada programa de `asm/`:
+  - a 50 MHz (puesta en marcha): los 8 programas iguales al ISS;
+  - a 94,444 MHz (frecuencia final): los 8 programas iguales al ISS.
+    Que la placa corría de verdad a esa frecuencia se comprobó midiendo la
+    duración de un RUN que termina por TIMEOUT: el reloj es de al menos
+    73,5 MHz, lo que descarta el bitstream de 50 MHz.
+
+  Detalle en timing.md §7.

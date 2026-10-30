@@ -143,7 +143,8 @@ levanta `halted`: `ebreak`, ILLEGAL, OOR o TIMEOUT, con el pipeline ya vacío.
 
 Continúa desde el estado actual: se puede hacer STEP varias veces y después
 RUN. Como el límite de ciclos se cuenta desde el reset, un RUN nunca dura más
-que `MAX_CYCLES` ciclos (10 ms a 100 MHz), así que el host puede esperar la
+que `MAX_CYCLES` ciclos (10 ms a 100 MHz, 10,6 ms a los 94,4 MHz de la
+placa), así que el host puede esperar la
 respuesta con el mismo timeout que el resto de los comandos.
 
 ### `0x04` STEP
@@ -311,7 +312,8 @@ la respuesta del RUN es `0x83` con un STATE de 204 bytes que contiene:
 | STATE con dmem completa (4 KiB) | 4305 | ~0,37 s |
 
 Timeout en el host: alcanza con 1 s para cualquier respuesta, RUN incluido
-(la ejecución dura como máximo 10 ms más la transmisión del STATE). `cli.py`
+(la ejecución dura como máximo ~10,6 ms a 94,4 MHz, más la transmisión del
+STATE). `cli.py`
 usa 2 s por defecto (`--timeout`).
 
 ## 9. Decisiones de diseño del protocolo
@@ -322,8 +324,8 @@ usa 2 s por defecto (`--timeout`).
 | SOF distinto por dirección (`A5`/`5A`) | el mismo SOF | en un log mezclado se distingue enseguida quién habla |
 | LOAD escribe mientras recibe y valida al final | buffer de 4 KiB y escritura después del checksum | no hace falta otra BRAM; un LOAD fallido deja `prog_valid = 0`, así que nunca se ejecuta basura |
 | RUN responde recién al terminar, con el STATE | ACK inmediato + aviso posterior | un solo mensaje y sin estados intermedios en el host; SPEC pide enviar el estado al terminar |
-| Sin comandos durante RUN (sin BREAK) | BREAK / RESET que aborte | el límite de ciclos garantiza que todo RUN termina en ≤ 10 ms; no hace falta parsear comandos mientras corre |
+| Sin comandos durante RUN (sin BREAK) | BREAK / RESET que aborte | el límite de ciclos garantiza que todo RUN termina en ≤ ~10,6 ms (a 94,4 MHz); no hace falta parsear comandos mientras corre |
 | STEP = 1 ciclo y siempre con STATE | STEP con conteo N; STEP sin volcado y DUMP aparte | es literalmente lo que pide SPEC §5.3; ~20 ms por paso es interactivo |
 | Volcado plano con offsets fijos (204 B + dmem) | TLV o un comando por sección | en hardware es un índice de bytes con un mux; en el host, un `struct.unpack` con offsets constantes |
 | `dmem_used` = high-water mark | bitmap, volcado completo | ver arquitectura.md §4.4 |
-| 115200 baudios | 230400/460800/921600 | el divisor entero de TP2 da +0,47 % de error a 100 MHz; a 921600 daría ~13 %. Las tramas son chicas, así que la velocidad no es el cuello de botella |
+| 115200 baudios | 230400/460800/921600 | el divisor entero de TP2 da +0,47 % de error a 100 MHz y también a los 94,4 MHz de la placa; a 921600 daría ~13 %. Las tramas son chicas, así que la velocidad no es el cuello de botella |

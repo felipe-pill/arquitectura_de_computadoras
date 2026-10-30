@@ -14,6 +14,9 @@
 // - STEP: one-cycle core_en pulse, then a STATE response.
 // - The board reset (rst) also runs the reset sequence.
 // - dmem_used tracks the highest word the core writes (high-water mark).
+//   The core's write (an EX-stage signal) is registered first and dmem_used
+//   follows one cycle later, so the debug logic is not on the core's
+//   forwarding -> ALU -> address path (docs/arquitectura.md 4.4).
 
 module dbg_ctrl #(
   parameter integer IMEM_ADDR_W   = 10,
@@ -85,9 +88,10 @@ module dbg_ctrl #(
   localparam [3:0] S_LOAD      = 4'd5;
   localparam [3:0] S_RUN       = 4'd6;
   localparam [3:0] S_STEP      = 4'd7;
-  localparam [3:0] S_STEP_LEN  = 4'd8;
-  localparam [3:0] S_SEND      = 4'd9;
-  localparam [3:0] S_SEND_WAIT = 4'd10;
+  localparam [3:0] S_STEP_HWM  = 4'd8;
+  localparam [3:0] S_STEP_LEN  = 4'd9;
+  localparam [3:0] S_SEND      = 4'd10;
+  localparam [3:0] S_SEND_WAIT = 4'd11;
 
   reg [3:0]             st;
   reg [7:0]             cur_cmd;
@@ -97,14 +101,15 @@ module dbg_ctrl #(
   reg [IMEM_ADDR_W:0]   widx;        // words received by LOAD
   reg [1:0]             bcnt;        // bytes of the current word
   reg [23:0]            wbuf;        // first three bytes of the current word
+  reg                   hwm_we;      // the core wrote dmem on the last edge
+  reg [DMEM_ADDR_W-1:0] hwm_addr;    // ... at this word
 
   assign core_en = running | step_pulse;
 
   wire load_len_ok = (len != 16'd0) && (len[1:0] == 2'b00) && (len <= 4 * IMEM_DEPTH);
   wire [15:0] state_len = STATE_BASE + {dmem_used, 2'b00};
 
-  wire                 cpu_writes = (cpu_dmem_we != 4'b0000);
-  wire [DMEM_ADDR_W:0] cpu_word_p1 = {1'b0, cpu_dmem_addr} + 1'b1;
+  wire [DMEM_ADDR_W:0] hwm_word_p1 = {1'b0, hwm_addr} + 1'b1;
 
   always @(posedge clk) begin
     if (rst) begin
@@ -116,6 +121,8 @@ module dbg_ctrl #(
       widx          <= 0;
       bcnt          <= 2'd0;
       wbuf          <= 24'd0;
+      hwm_we        <= 1'b0;
+      hwm_addr      <= 0;
       tx_start      <= 1'b0;
       tx_rsp        <= 8'd0;
       tx_len        <= 16'd0;
@@ -136,9 +143,12 @@ module dbg_ctrl #(
       step_pulse <= 1'b0;
       imem_we    <= 1'b0;
 
-      // dmem high-water mark (cleared below by the reset sequence)
-      if (cpu_writes && cpu_word_p1 > dmem_used)
-        dmem_used <= cpu_word_p1;
+      // dmem high-water mark, one cycle behind the core's write (cleared
+      // below by the reset sequence)
+      hwm_we   <= (cpu_dmem_we != 4'b0000);
+      hwm_addr <= cpu_dmem_addr;
+      if (hwm_we && hwm_word_p1 > dmem_used)
+        dmem_used <= hwm_word_p1;
 
       case (st)
         // ---------------- reset sequence ----------------
@@ -148,6 +158,7 @@ module dbg_ctrl #(
           dmem_clr      <= 1'b1;
           dmem_clr_addr <= 0;
           dmem_used     <= 0;
+          hwm_we        <= 1'b0;
           st            <= S_CLR;
         end
         S_CLR: begin
@@ -275,8 +286,12 @@ module dbg_ctrl #(
         end
         S_STEP: begin
           // core_en = 1 during this cycle: the core takes its single
-          // enabled edge at the end of it, and dmem_used follows a store
-          // made by that edge at the same time
+          // enabled edge at the end of it
+          st <= S_STEP_HWM;
+        end
+        S_STEP_HWM: begin
+          // dmem_used takes a store made by that edge at the end of this
+          // cycle, so S_STEP_LEN reads the updated value
           st <= S_STEP_LEN;
         end
         S_STEP_LEN: begin

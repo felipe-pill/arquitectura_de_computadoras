@@ -15,7 +15,7 @@ por UART, para la Basys 3. La especificación completa está en
 | 4 | Modo step, enable global y reset (verificación, sin cambios de RTL) | hecha |
 | 5 | Debug Unit y protocolo UART, con testbench a nivel de bits serie | hecha |
 | 6 | CLI en Python para la placa | hecha |
-| 7 | Tope de placa, constraints, build, timing, frecuencia del MMCM | pendiente |
+| 7 | Tope de placa, constraints, build, timing, frecuencia del MMCM (94,444 MHz) | hecha |
 | 8 | Documentación final y respuestas a las preguntas de SPEC §8 | pendiente |
 
 Cambio respecto del orden de SPEC: HALT y drenaje se hicieron en la fase 3 y
@@ -30,6 +30,8 @@ definido para comparar contra el ISS (verificacion.md §4).
 | `TP3/sim/` | testbenches autoverificables (`tb_*.v`), `prebuild.bat` y datos fijos (`data/`) |
 | `TP3/py/` | ensamblador, ISS, generador de vectores de prueba, protocolo y CLI para la placa, y sus tests |
 | `TP3/asm/` | programas de ejemplo, uno por característica |
+| `TP3/constrs/` | constraints de la Basys 3 (`basys3.xdc`) |
+| `TP3/scripts/` | build de Vivado sin proyecto (`build.tcl`) |
 | `TP3/docs/` | esta documentación |
 
 ## Cómo se corre
@@ -41,10 +43,11 @@ Desde la raíz del repo:
 python -m unittest discover -s TP3/py -v         # tests de Python
 python TP3/py/assembler.py TP3/asm/loop.s        # ensamblar
 python TP3/py/iss.py TP3/asm/loop.s              # simular en el ISS
-python TP3/py/cli.py --port COM5                 # CLI con la placa conectada
+.\build.bat TP3                                  # synth, place, route, reportes y .bit
+python TP3/py/cli.py --port COM3                 # CLI con la placa conectada
 ```
 
-Detalles en verificacion.md §1 y herramientas.md.
+Detalles en verificacion.md §1, herramientas.md y timing.md §2.
 
 ## Documentos
 
@@ -55,6 +58,7 @@ Detalles en verificacion.md §1 y herramientas.md.
 | [protocol.md](protocol.md) | protocolo UART: tramas, comandos, errores, formato exacto del volcado, ejemplos |
 | [verificacion.md](verificacion.md) | cómo se simula, solución de `$readmemh` (pre-build), qué cubre cada testbench, errores inyectados para validar los tests |
 | [herramientas.md](herramientas.md) | ensamblador, ISS (con modelo de ciclos), generador de vectores, programas de `asm/`, CLI para la placa |
+| [timing.md](timing.md) | tope de placa, build, utilización, camino crítico, skew, elección de la frecuencia del MMCM (paso a paso: 100 → 50 → cambio de RTL → 100 → 98 → 94,444 MHz), prueba en la placa |
 
 ## Resumen de decisiones
 
@@ -71,11 +75,12 @@ Detalles en verificacion.md §1 y herramientas.md.
 | Memorias | BRAM inferida (no IP), direccionada un ciclo antes: imem con `next_pc`, dmem con la dirección de EX | arq. §4.1-4.2 |
 | Stores | se escriben al final de EX (consecuencia de lo anterior; seguro porque EX nunca se cancela) | arq. §4.2 |
 | Debug sobre dmem | puerto B de solo lectura: el volcado no pisa el pipeline | arq. §4.3 |
-| Memoria "usada" | high-water mark por palabra | arq. §4.4 |
+| Memoria "usada" | high-water mark por palabra, actualizado un ciclo después para no alargar el camino crítico | arq. §4.4, §4.4.1 |
 | HALT y drenaje | marcador HALT que viaja hasta WB; `halted` cuando sale, con los 4 registros vacíos; PC final = dirección de la instrucción que detuvo (convención de `mepc` y GDB) | arq. §5 |
-| Sin HALT | OOR (`PC >= 4*prog_len`) + TIMEOUT (`MAX_CYCLES` fijo = 1 000 000, 10 ms a 100 MHz) | arq. §5.4 |
+| Sin HALT | OOR (`PC >= 4*prog_len`) + TIMEOUT (`MAX_CYCLES` fijo = 1 000 000, 10,6 ms a 94,4 MHz) | arq. §5.4 |
 | Step | `core_en = running \|\| step_pulse` en los CE de FFs y BRAM; el reloj no se toca | arq. §6 |
 | Reset | RESET y LOAD borran registros y dmem; la imem no se borra; registros en 0, incluido `sp` | arq. §6.3 |
+| Reloj | un solo dominio; MMCM a 94,444 MHz (M = 17, D = 2, O = 9), la mayor frecuencia que cumplió timing | timing.md §5 |
 | UART | TP2 sin cambios, 115200 8N1; tramas `SOF CMD LEN PAYLOAD CHK`; solo LOAD, RESET, RUN, STEP y DUMP | protocol.md |
 
 Quedan fuera de alcance, a propósito, para no sobrediseñar: PING, BREAK,
