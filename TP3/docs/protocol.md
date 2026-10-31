@@ -18,7 +18,7 @@ continua, step, reset y volcado de estado), sin extras.
   LSB primero (los módulos de TP2 sin cambios).
 - Sin control de flujo por hardware.
 - La Debug Unit no tiene FIFO de recepción: procesa cada byte en el ciclo en
-  que llega, lo que sobra porque un byte dura ~8700 ciclos a 100 MHz.
+  que llega, lo que sobra porque un byte dura ~8200 ciclos a 94,4 MHz.
 
 ## 2. Reglas generales
 

@@ -1,8 +1,8 @@
 # TP3 - Verificación (simulación)
 
-Estado: **Fase 6 terminada**. El core, la Debug Unit, `system_top` y la CLI
-del host están verificados. Los 24 testbenches dan `SIM OK` y los 74 tests de
-Python pasan.
+Estado: **Fase 7 terminada**. El core, la Debug Unit, `system_top` y la CLI
+del host están verificados en simulación, y el sistema completo en la placa
+(§8). Los 24 testbenches dan `SIM OK` y los 74 tests de Python pasan.
 
 ## 1. Cómo se corre
 

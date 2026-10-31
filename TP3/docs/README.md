@@ -16,7 +16,7 @@ por UART, para la Basys 3. La especificación completa está en
 | 5 | Debug Unit y protocolo UART, con testbench a nivel de bits serie | hecha |
 | 6 | CLI en Python para la placa | hecha |
 | 7 | Tope de placa, constraints, build, timing, frecuencia del MMCM (94,444 MHz) | hecha |
-| 8 | Documentación final y respuestas a las preguntas de SPEC §8 | pendiente |
+| 8 | Documentación final y respuestas a las preguntas de SPEC §8 | hecha |
 
 Cambio respecto del orden de SPEC: HALT y drenaje se hicieron en la fase 3 y
 no en la 4, porque los tests a nivel CPU necesitan un fin de ejecución
@@ -53,6 +53,7 @@ Detalles en verificacion.md §1, herramientas.md y timing.md §2.
 
 | Documento | Contenido |
 |---|---|
+| [respuestas.md](respuestas.md) | **respuestas a las 8 preguntas de SPEC §8**, cortas y con referencias al detalle |
 | [arquitectura.md](arquitectura.md) | diagramas de bloques (Mermaid), decodificación, riesgos, memorias/BRAM, HALT y drenaje, enable global y step, resets, lectura de estado, reuso de TPs anteriores |
 | [modulos.md](modulos.md) | jerarquía y puertos de cada módulo |
 | [protocol.md](protocol.md) | protocolo UART: tramas, comandos, errores, formato exacto del volcado, ejemplos |

@@ -188,8 +188,8 @@ uno. Cada error hizo fallar al menos un test.
 ## 6. CLI para la placa (`cli.py`, fase 6)
 
 ```
-python TP3/py/cli.py --port COM5                              # interactiva
-python TP3/py/cli.py --port COM5 -c "load TP3/asm/loop.s" -c run -c check
+python TP3/py/cli.py --port COM3                              # interactiva
+python TP3/py/cli.py --port COM3 -c "load TP3/asm/loop.s" -c run -c check
 ```
 
 Opciones:
@@ -238,7 +238,7 @@ Después de cada comando muestra:
 
 ```python
 import serial, protocol
-with serial.Serial("COM5", 115200, timeout=2) as ser:
+with serial.Serial("COM3", 115200, timeout=2) as ser:
     dbg = protocol.DebugClient(ser)
     dbg.load(words); state = dbg.run()
     print(state.halt_reason_name, state.cycles, state.regs[10])

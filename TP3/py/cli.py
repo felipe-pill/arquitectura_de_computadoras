@@ -1,7 +1,7 @@
 """Interactive host CLI for the TP3 processor (docs/protocol.md).
 
-    python TP3/py/cli.py --port COM5
-    python TP3/py/cli.py --port COM5 -c "load TP3/asm/loop.s" -c run -c check
+    python TP3/py/cli.py --port COM3
+    python TP3/py/cli.py --port COM3 -c "load TP3/asm/loop.s" -c run -c check
 
 Commands: load <file>, step [n], run, reset, dump, mem, check, help, quit.
 After each command it shows the processor state:
@@ -402,7 +402,7 @@ class Shell(cmd.Cmd):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="TP3 RV32I debug CLI")
-    parser.add_argument("--port", required=True, help="serial port, e.g. COM5 or /dev/ttyUSB1")
+    parser.add_argument("--port", required=True, help="serial port, e.g. COM3 or /dev/ttyUSB1")
     parser.add_argument("--baud", type=int, default=DEFAULT_BAUD)
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT,
                         help="seconds to wait for each response")

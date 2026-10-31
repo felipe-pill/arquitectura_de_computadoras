@@ -9,6 +9,7 @@ Documentos relacionados:
 - [modulos.md](modulos.md): lista de módulos con sus puertos.
 - [protocol.md](protocol.md): protocolo UART entre la PC y la Debug Unit.
 - [README.md](README.md): estado por fase, índice y resumen de decisiones.
+- [respuestas.md](respuestas.md): respuestas a las preguntas de SPEC §8.
 
 Convención de este documento: cada decisión tiene la forma
 **Decisión / Alternativas consideradas / Por qué**.
@@ -552,8 +553,10 @@ detenido.
 | Niveles de lógica del peor camino | 14 | 11 |
 | Fin del peor camino | `dmem_used` (Debug Unit) | write-enable de la dmem (core) |
 
-Ahora el camino crítico es del core (EX/MEM → forwarding → ALU → byte-enable
-del store → `WEA` de la dmem). Los 24 testbenches pasan. Si se quita
+Ahora el camino crítico es del core: a 100 MHz, EX/MEM → forwarding → ALU →
+byte-enable del store → `WEA` de la dmem. En el build final (94,444 MHz) el
+peor camino es una variante del mismo recorrido que termina en la dirección
+de la imem (timing.md §4). Los 24 testbenches pasan. Si se quita
 `S_STEP_HWM`, `tb_system_top` falla (verificacion.md §6.3).
 
 ### 4.5 Contenido inicial
@@ -779,7 +782,8 @@ de `imem[0]` sea la nueva y no una colisión lectura/escritura.
 sea reproducible y coincida con el ISS, que arranca de todo en cero. También
 hace que el high-water mark tenga sentido. La imem no se borra: LOAD la
 sobrescribe y `prog_len` (OOR) evita ejecutar restos de un programa anterior.
-Esto anticipa las respuestas a las preguntas 8.1-8.4.
+Las respuestas a las preguntas 8.1-8.4 están en
+[respuestas.md](respuestas.md).
 
 ---
 
@@ -807,7 +811,8 @@ LUTs y el formato queda definido en un solo lugar (protocol.md).
 
 Banco de registros en flip-flops, no en LUTRAM: con 3 puertos de lectura más
 el reset síncrono, la LUTRAM necesitaría 3 copias y un borrado por barrido.
-Con flip-flops son 1024 FFs (de 41 600 disponibles) y ~3 mux 32:1 × 32 bits.
+Con flip-flops son 992 FFs (31 × 32, x0 no se almacena; de 41 600
+disponibles) y ~3 mux 32:1 × 32 bits (timing.md §3).
 
 ---
 
