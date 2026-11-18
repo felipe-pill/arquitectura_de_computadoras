@@ -209,6 +209,7 @@ error, útil para probar la placa con un script.
 | `run` | RUN hasta HALT, ILLEGAL, OOR o TIMEOUT |
 | `reset` | RESET: registros y dmem a 0, el programa queda cargado |
 | `dump` / `mem` | DUMP sin avanzar; `mem` muestra todas las palabras de dmem usadas |
+| `pipe [on\|off]` | muestra todos los campos del PC (con `next_pc`) y de los cuatro registros de pipeline del último estado, marcando lo que cambió respecto de la pantalla anterior; `pipe on` los agrega a cada pantalla, `pipe off` los saca |
 | `check` | compara el estado final con el ISS (`iss.run`) sobre el programa cargado en la sesión: motivo, PC, ciclos, registros y dmem |
 | `quit` | sale |
 
@@ -220,7 +221,12 @@ Después de cada comando muestra:
   `rd <= valor` de WB). Marca las burbujas, el marcador HALT, los slots de
   detención (OOR/TIMEOUT) y un PC fuera del programa. Las instrucciones de
   EX, MEM y WB se reconstruyen con el `pc` de cada etapa y el programa
-  cargado en la sesión, porque el volcado no las incluye.
+  cargado en la sesión, porque el volcado no las incluye. La fila IF muestra
+  además `next_pc`, el PC que va a tener el core después del próximo flanco,
+  y el motivo: `pc + 4`, salto tomado o jalr, jal en ID, stall de load-use,
+  vuelta al PC de un slot de detención aceptado, drenaje o core detenido.
+  `next_pc` no viaja en el volcado. Se calcula en el host con la misma
+  prioridad que el mux de `fetch_unit` (arquitectura.md §3.4).
 - **Próximo ciclo:** qué va a hacer el hardware en el siguiente flanco:
   forwarding (de dónde y qué valor), stall de load-use, flush por salto
   tomado o jalr (con el destino), jal en ID, aceptación de un slot de
@@ -233,6 +239,12 @@ Después de cada comando muestra:
 - **Registros y dmem:** con lo que cambió desde la pantalla anterior
   resaltado (amarillo, o `*` sin color). Tras `step n`, los cambios son
   respecto del estado anterior a los n pasos.
+
+`pipe` muestra los registros de pipeline tal como llegan en el volcado
+(protocol.md §6.2), campo por campo: datos de 32 bits en hexadecimal (`imm`
+también con signo) y señales de control como números. Para seguir un
+programa ciclo a ciclo: `pipe on` y después `step`. Con `run` solo se ve el
+estado final, con el pipeline ya vacío.
 
 `protocol.py` sirve también fuera de la CLI:
 

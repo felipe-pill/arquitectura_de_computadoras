@@ -3,7 +3,8 @@
     python TP3/py/cli.py --port COM3
     python TP3/py/cli.py --port COM3 -c "load TP3/asm/loop.s" -c run -c check
 
-Commands: load <file>, step [n], run, reset, dump, mem, check, help, quit.
+Commands: load <file>, step [n], run, reset, dump, mem, pipe [on|off], check,
+help, quit.
 After each command it shows the processor state:
 - status line (cycles, halted / halt reason, program size);
 - the instruction in each pipeline stage, disassembled, with the values in
@@ -12,6 +13,8 @@ After each command it shows the processor state:
   hardware decides it (docs/arquitectura.md 3);
 - registers and data memory, highlighting what changed since the previous
   screen.
+`pipe` shows every field of the PC (with next_pc) and of the four pipeline
+registers; `pipe on` adds that to every screen.
 `check` compares the final state with the reference ISS (iss.py).
 """
 
@@ -20,6 +23,7 @@ import cmd
 import os
 import re
 import sys
+from dataclasses import fields
 
 import isa
 import iss
@@ -159,6 +163,27 @@ def next_cycle_hints(s):
     return hints or ["no hazards"]
 
 
+def next_pc(s):
+    """(next_pc, reason): the value the PC takes on the next enabled edge.
+    Mirrors the next_pc mux of fetch_unit (docs/arquitectura.md 3.4):
+    EX redirect > stop slot accepted (back to its pc) > draining / load-use
+    (hold) > jal in ID > pc + 4. Halted: the core is frozen (en_int = 0)."""
+    if s.halted:
+        return s.pc, "halted: frozen"
+    ev = next_cycle_events(s)
+    if ev["redirect"]:
+        return ev["target"], "jalr" if s.id_ex.jalr else "branch taken"
+    if ev["halt_accept"]:
+        return s.if_id.pc, "stop slot accepted: back to its pc"
+    if s.halting:
+        return s.pc, "draining: hold"
+    if ev["load_use"]:
+        return s.pc, "load-use stall: hold"
+    if ev["id_jal"]:
+        return ev["jal_target"], "jal in ID"
+    return (s.pc + 4) & isa.MASK32, "pc + 4"
+
+
 # ---------------------------------------------------------------------------
 # Rendering
 # ---------------------------------------------------------------------------
@@ -177,7 +202,8 @@ def _pipeline_rows(s, program, st):
     text = _instr_at(program, s.pc)
     if s.prog_len and s.pc >= 4 * s.prog_len:
         text = "(past the end of the program: OOR)"
-    rows.append(("IF", f"0x{s.pc:08x}", text or "", ""))
+    npc, why = next_pc(s)
+    rows.append(("IF", f"0x{s.pc:08x}", text or "", f"next_pc 0x{npc:08x} ({why})"))
 
     if not d.valid:
         rows.append(("ID", "", st.dim("-- bubble --"), ""))
@@ -264,6 +290,52 @@ def render(s, prev=None, program=None, st=None, mem_limit=MEM_PREVIEW_WORDS):
     return "\n".join(lines)
 
 
+PIPE_REGS = (("IF/ID", "if_id"), ("ID/EX", "id_ex"), ("EX/MEM", "ex_mem"),
+             ("MEM/WB", "mem_wb"))
+WORD_FIELDS = {"pc", "instr", "rs1_data", "rs2_data", "imm", "result",
+               "store_data", "wb_data"}
+FIELDS_PER_LINE = 7
+
+
+def _field_text(name, value):
+    if isinstance(value, bool):
+        return f"{name}={int(value)}"
+    if name == "imm":
+        return f"imm=0x{value:08x} ({isa.to_signed(value)})"
+    if name in WORD_FIELDS:
+        return f"{name}=0x{value:08x}"
+    return f"{name}={value}"
+
+
+def render_pipe_regs(s, prev=None, st=None):
+    """Every field of the PC and of the four pipeline registers, as dumped
+    (docs/protocol.md 6.2), plus next_pc. Fields that changed since prev are
+    highlighted (yellow / *)."""
+    st = st or Style(False)
+
+    def cell(name, value, old):
+        text = _field_text(name, value)
+        return st.changed(text + "*") if prev is not None and old != value else text
+
+    npc, why = next_pc(s)
+    lines = [st.bold("Pipeline registers") + ("  (changed in yellow / *)" if prev else "")]
+    pc_cell = cell("pc", s.pc, prev.pc if prev else None)
+    lines.append(f"  {'PC':<7} {pc_cell}  next_pc=0x{npc:08x} ({why})")
+    for title, attr in PIPE_REGS:
+        regs = getattr(s, attr)
+        old = getattr(prev, attr) if prev else None
+        words, flags = [], []
+        for f in fields(regs):
+            value = getattr(regs, f.name)
+            c = cell(f.name, value, getattr(old, f.name) if old else None)
+            (words if f.name in WORD_FIELDS else flags).append(c)
+        chunks = [words] + [flags[i:i + FIELDS_PER_LINE]
+                            for i in range(0, len(flags), FIELDS_PER_LINE)]
+        for i, chunk in enumerate(chunks):
+            lines.append(f"  {title if i == 0 else '':<7} " + "  ".join(chunk))
+    return "\n".join(lines)
+
+
 def compare_with_iss(s, program, max_cycles=DEFAULT_MAX_CYCLES):
     """Differences between a halted State and the ISS run of `program`."""
     res = iss.run(program, max_cycles=max_cycles)
@@ -303,6 +375,8 @@ class Shell(cmd.Cmd):
         self.max_cycles = max_cycles
         self.program = None      # words loaded in this session (for disassembly)
         self.state = None        # last State shown
+        self.prev = None         # the State shown before it (for 'pipe' diffs)
+        self.pipe_detail = False # 'pipe on': every screen shows all the fields
         self.failed = False      # an error happened (for scripted use)
 
     # ---- helpers ----
@@ -311,7 +385,10 @@ class Shell(cmd.Cmd):
 
     def show(self, new, mem_limit=MEM_PREVIEW_WORDS):
         self.say(render(new, self.state, self.program, self.st, mem_limit))
-        self.state = new
+        if self.pipe_detail:
+            self.say("")
+            self.say(render_pipe_regs(new, self.state, self.st))
+        self.prev, self.state = self.state, new
 
     def onecmd(self, line):
         try:
@@ -375,6 +452,23 @@ class Shell(cmd.Cmd):
     def do_mem(self, arg):
         """mem: show the state with every used data memory word."""
         self.show(self.client.dump(), mem_limit=1 << 16)
+
+    def do_pipe(self, arg):
+        """pipe [on|off]: show every field of the PC and the pipeline registers
+        (changes since the previous screen marked); on/off: show them after
+        every command."""
+        arg = arg.strip().lower()
+        if arg in ("on", "off"):
+            self.pipe_detail = arg == "on"
+            self.say(f"pipeline register detail {arg}")
+            return
+        if arg:
+            raise ValueError("usage: pipe [on|off]")
+        if self.state is None:
+            self.show(self.client.dump())
+            if self.pipe_detail:
+                return
+        self.say(render_pipe_regs(self.state, self.prev, self.st))
 
     def do_check(self, arg):
         """check: compare the final state with the ISS run of the loaded program."""

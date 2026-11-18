@@ -358,8 +358,8 @@ Sin la placa conectada, la CLI se prueba contra un puerto serie simulado.
 | Archivo | Qué verifica | Tests |
 |---|---|---|
 | `test_protocol.py` | tramas de pedido y respuesta contra los ejemplos de protocol.md §7; `read_frame` con SOF, checksum o largo incorrectos; `decode_state` campo por campo (cada bit de control en su lugar, con payloads armados por un codificador independiente escrito desde los offsets de protocol.md §6); `DebugClient` con cada comando, cada código de error y respuestas inesperadas o faltantes | 10 |
-| `test_cli.py` | pistas del próximo ciclo, escenario por escenario (forwarding y su prioridad, load en EX/MEM, x0, load-use, `ebreak` detrás de un load, branch con operando forwardeado, bne no tomado, destino de jalr, jal en ID, slot de detención en el camino equivocado, códigos de detención); el render (burbujas, marcador HALT, OOR, cambios resaltados, alineación con colores); el shell completo contra una placa simulada con el ISS (`load`, `run`, `check`, una diferencia detectada, errores de la placa, `step n` que se detiene en HALT, `reset`, rutas de Windows) | 22 |
-| `test_hints_rtl.py` | pistas del próximo ciclo contra el RTL (7.1) | 1 |
+| `test_cli.py` | pistas del próximo ciclo, escenario por escenario (forwarding y su prioridad, load en EX/MEM, x0, load-use, `ebreak` detrás de un load, branch con operando forwardeado, bne no tomado, destino de jalr, jal en ID, slot de detención en el camino equivocado, códigos de detención); `next_pc` en cada caso de la prioridad de `fetch_unit` (secuencial, salto tomado, jalr antes que jal en ID, jal en ID, load-use, slot de detención aceptado, drenaje, detenido); el render (burbujas, marcador HALT, OOR, `next_pc` en la fila IF, cambios resaltados, alineación con colores); la vista `pipe` (cada campo de los cuatro registros en su lugar, cambios marcados); el shell completo contra una placa simulada con el ISS (`load`, `run`, `check`, una diferencia detectada, errores de la placa, `step n` que se detiene en HALT, `reset`, rutas de Windows, `pipe` y `pipe on`) | 33 |
+| `test_hints_rtl.py` | pistas del próximo ciclo y `next_pc` contra el RTL (7.1) | 1 |
 
 ### 7.1 Pistas del próximo ciclo contra el RTL
 
@@ -373,7 +373,9 @@ destino, aceptación de HALT).
 
 `test_hints_rtl.py` decodifica cada ciclo con `decode_state()` y exige que
 `next_cycle_events()` prediga exactamente lo que hizo el hardware. También
-valida `decode_state()` sobre bytes reales del RTL.
+exige que el `next_pc()` calculado en cada ciclo sea el PC de la línea
+siguiente de la traza. Además valida `decode_state()` sobre bytes reales del
+RTL.
 
 Resultado: **14 718 ciclos coinciden**, entre ellos:
 - 1170 con forwarding;
@@ -381,6 +383,9 @@ Resultado: **14 718 ciclos coinciden**, entre ellos:
 - 1758 flushes por salto tomado o jalr;
 - 613 jal en ID;
 - 63 slots de detención aceptados.
+
+`next_pc` coincide en **14 614 transiciones** (todos los pares de ciclos
+consecutivos dentro de cada programa).
 
 El test se saltea si no existe la traza: hay que correr antes
 `.\sim.bat TP3 tb_cpu_core`.
@@ -395,6 +400,14 @@ El test se saltea si no existe la traza: hay que correr antes
   traza. Ese estado es inalcanzable en el hardware: el stall de load-use lo
   impide, y `tb_cpu_core` verifica que nunca ocurre. Ese caso lo cubre el
   test a mano `test_load_in_mem_is_not_forwarded`.
+- En `next_pc`, la traza del RTL detectó tres errores inyectados:
+  - un slot de detención aceptado que mantiene `pc` en vez de volver al
+    `pc` del slot;
+  - sin hold durante el drenaje;
+  - sin hold en el stall de load-use.
+- Un cuarto error (core detenido que avanza a `pc + 4`) **no** lo detecta la
+  traza, porque ningún ciclo detenido tiene una línea siguiente. Lo cubre el
+  test a mano `test_draining_and_halted_hold`.
 - Los tests de la CLI encontraron un error real de la primera versión:
   `load` partía el argumento con `shlex`, que se come las barras invertidas
   de las rutas de Windows (`C:\Users\...` → `C:Users...`). Se corrigió, y

@@ -5,7 +5,8 @@ cycles of each of its programs, the debug vector (bytes 12..75 of a STATE
 dump) and the hazard decisions the core takes on the next edge (forwarding
 selects, load-use stall, EX redirect + target, jal in ID + target, HALT
 accepted). Here each cycle's vector is decoded with protocol.decode_state()
-and cli.next_cycle_events() must predict exactly what the hardware did.
+and cli.next_cycle_events() must predict exactly what the hardware did;
+cli.next_pc() must predict the PC of the following trace line.
 
 Needs the trace: run  .\\sim.bat TP3 tb_cpu_core  first (otherwise skipped).
 """
@@ -36,11 +37,14 @@ class TestHintsAgainstRtl(unittest.TestCase):
         cycles = 0
         seen = {k: 0 for k in ("fwd", "load_use", "redirect", "id_jal", "halt_accept")}
         name = "?"
+        prev = None          # (next_pc predicted on the previous line, where)
+        npc_checked = 0
         with open(TRACE) as f:
             for line in f:
                 parts = line.split()
                 if parts[0] == "T":
                     name = " ".join(parts[1:])
+                    prev = None
                     continue
                 (vec, halting, halted, fwd_a, fwd_b, load_use, redirect,
                  target, id_jal, jal_target, halt_accept) = parts[1:]
@@ -58,6 +62,11 @@ class TestHintsAgainstRtl(unittest.TestCase):
                     self.assertEqual(ev["target"], int(target, 16), where)
                 if hw["id_jal"]:
                     self.assertEqual(ev["jal_target"], int(jal_target, 16), where)
+                # the next_pc predicted one line earlier = the PC the core reached
+                if prev is not None:
+                    self.assertEqual(s.pc, prev[0], f"next_pc predicted at {prev[1]}")
+                    npc_checked += 1
+                prev = (cli.next_pc(s)[0], where)
                 cycles += 1
                 seen["fwd"] += bool(hw["fwd_a"] or hw["fwd_b"])
                 for k in ("load_use", "redirect", "id_jal", "halt_accept"):
@@ -66,7 +75,8 @@ class TestHintsAgainstRtl(unittest.TestCase):
         self.assertGreater(cycles, 1000)
         for k, n in seen.items():
             self.assertGreater(n, 10, f"too few '{k}' events in the trace")
-        print(f"\n  checked {cycles} cycles against the RTL: {seen}")
+        self.assertGreater(npc_checked, 1000)
+        print(f"\n  checked {cycles} cycles against the RTL: {seen}, next_pc {npc_checked}")
 
 
 if __name__ == "__main__":

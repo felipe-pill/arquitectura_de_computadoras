@@ -120,6 +120,42 @@ class TestHints(unittest.TestCase):
         self.assertEqual(text, "halted (ILLEGAL): the pipeline is empty; RESET or LOAD to run again")
 
 
+class TestNextPc(unittest.TestCase):
+    """next_pc follows the fetch priority of docs/arquitectura.md 3.4."""
+
+    def npc(self, **kw):
+        return cli.next_pc(state(**kw))
+
+    def test_sequential(self):
+        self.assertEqual(self.npc(pc=0x10), (0x14, "pc + 4"))
+
+    def test_branch_taken_redirects(self):
+        self.assertEqual(self.npc(pc=0x28, id_ex=(0x20, 3, 3, 0xFFFFFFF0, idex(rs1=1, rs2=2, branch=1))),
+                         (0x10, "branch taken"))
+
+    def test_jalr_redirect_wins_over_jal_in_id(self):
+        self.assertEqual(self.npc(pc=0x28, if_id=(0x24, asm1("jal x1, 8"), 1),
+                                  id_ex=(0x20, 0x41, 0, 0, idex(rs1=1, jalr=1, alu_src=1))),
+                         (0x40, "jalr"))
+
+    def test_jal_in_id(self):
+        self.assertEqual(self.npc(pc=0x14, if_id=(0x10, asm1("jal x1, 8"), 1)),
+                         (0x18, "jal in ID"))
+
+    def test_load_use_holds(self):
+        self.assertEqual(self.npc(pc=0x0C, if_id=(0x8, asm1("add x6, x5, x0"), 1),
+                                  id_ex=(0x4, 0, 0, 0, idex(rd=5, reg_write=1, mem_read=1, alu_src=1))),
+                         (0x0C, "load-use stall: hold"))
+
+    def test_stop_slot_goes_back_to_its_pc(self):
+        self.assertEqual(self.npc(pc=0x10, if_id=(0x0C, isa.EBREAK, 1)),
+                         (0x0C, "stop slot accepted: back to its pc"))
+
+    def test_draining_and_halted_hold(self):
+        self.assertEqual(self.npc(flags=0b110, pc=0x0C), (0x0C, "draining: hold"))
+        self.assertEqual(self.npc(flags=0b101, pc=0x0C), (0x0C, "halted: frozen"))
+
+
 # ---------------------------------------------------------------------------
 # Rendering
 # ---------------------------------------------------------------------------
@@ -142,6 +178,39 @@ class TestRender(unittest.TestCase):
         self.assertIn("store 0x00000002 done at [0x00000000]", text)
         self.assertIn("add x2, x1, x1", text)
         self.assertIn("x2 <= 0x00000002", text)
+
+    def test_if_row_shows_next_pc(self):
+        text = cli.render(state(pc=0x10, if_id=(0x0C, asm1("jal x1, 8"), 1)), program=self.PROGRAM)
+        self.assertIn("next_pc 0x00000014 (jal in ID)", text)
+
+    def test_pipe_regs_show_every_field(self):
+        s = state(pc=0x14,
+                  if_id=(0x10, 0x00208133, 1),
+                  id_ex=(0x0C, 0x11, 0x22, 0xFFFFFFFC,
+                         idex(rs1=1, rs2=2, rd=3, alu_src=1, reg_write=1, funct3=5) | 0xA << 15),
+                  ex_mem=(0x08, 0x33, 0x44, exmem(rd=4, mem_write=1) | 2 << 8),
+                  mem_wb=(0x04, 0x55, memwb(rd=6, reg_write=1) | 1 << 6))
+        text = cli.render_pipe_regs(s)
+        self.assertIn("PC      pc=0x00000014  next_pc=0x00000018 (pc + 4)", text)
+        self.assertIn("IF/ID   pc=0x00000010  instr=0x00208133", text)
+        self.assertIn("valid=1  stop_code=0", text)
+        self.assertIn("ID/EX   pc=0x0000000c  rs1_data=0x00000011  rs2_data=0x00000022  imm=0xfffffffc (-4)", text)
+        self.assertIn("rs1=1  rs2=2  rd=3  alu_op=10  alu_src=1  link=0  reg_write=1", text)
+        self.assertIn("mem_read=0  mem_write=0  funct3=5  branch=0  jalr=0  is_halt=0  valid=1", text)
+        self.assertIn("EX/MEM  pc=0x00000008  result=0x00000033  store_data=0x00000044", text)
+        self.assertIn("rd=4  reg_write=0  mem_read=0  mem_write=1  funct3=2  is_halt=0  valid=1", text)
+        self.assertIn("MEM/WB  pc=0x00000004  wb_data=0x00000055", text)
+        self.assertIn("rd=6  reg_write=1  mem_read=1  is_halt=0  valid=1", text)
+        self.assertNotIn("*", text)
+
+    def test_pipe_regs_mark_changes(self):
+        before = state(pc=0x10, mem_wb=(0x04, 0x55, memwb(rd=6, reg_write=1)))
+        after = state(pc=0x14, mem_wb=(0x04, 0x56, memwb(rd=6, reg_write=1)))
+        text = cli.render_pipe_regs(after, prev=before)
+        self.assertIn("pc=0x00000014*", text)
+        self.assertIn("wb_data=0x00000056*", text)
+        self.assertIn("MEM/WB  pc=0x00000004  ", text)
+        self.assertNotIn("rd=6*", text)
 
     def test_changed_registers_and_memory_are_marked(self):
         before = state(regs=[0, 1, 2] + [0] * 29, dmem=(5,))
@@ -265,6 +334,22 @@ class TestShell(unittest.TestCase):
             shell, text = run_shell(IssBoard(), f"load {arg}")
             self.assertFalse(shell.failed, text)
             self.assertIn("loaded 11 words", text)
+
+    def test_pipe_command(self):
+        steps = [make_state(flags=0b100, prog_len=11, cycles=1, pc=0x4, if_id=(0, 0x13, 1)),
+                 make_state(flags=0b100, prog_len=11, cycles=2, pc=0x8, if_id=(4, 0x13, 1))]
+        shell, text = run_shell(IssBoard(step_states=list(steps)), f"load {self.LOOP}", "step", "pipe")
+        self.assertFalse(shell.failed, text)
+        detail = text.split("Pipeline registers")[1]
+        self.assertIn("pc=0x00000004*", detail)          # against the screen before the step
+        self.assertIn("next_pc=0x00000008 (pc + 4)", detail)
+        shell, text = run_shell(IssBoard(step_states=list(steps)),
+                                f"load {self.LOOP}", "pipe on", "step", "step")
+        self.assertIn("pipeline register detail on", text)
+        self.assertEqual(text.count("Pipeline registers"), 2)
+        self.assertIn("IF/ID   pc=0x00000004*", text)
+        shell, text = run_shell(IssBoard(), "pipe x")
+        self.assertIn("usage: pipe [on|off]", text)
 
     def test_reset_and_usage_errors(self):
         shell, text = run_shell(IssBoard(), f"load {self.LOOP}", "run", "reset")
