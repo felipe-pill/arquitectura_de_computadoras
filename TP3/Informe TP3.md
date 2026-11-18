@@ -30,7 +30,7 @@ El procesador deberá admitir la ejecución de instrucciones pertenecientes a lo
 
 **RF-09**. Consulta de registros: El sistema deberá permitir obtener y transmitir a la computadora el contenido de los 32 registros de propósito general del procesador.
 
-**RF-10. **Consulta de pipeline: El sistema deberá permitir obtener y transmitir a la computadora el contenido de los registros intermedios (pipeline registers/latches) que almacenan información entre las distintas etapas del pipeline.
+**RF-10.** Consulta de pipeline: El sistema deberá permitir obtener y transmitir a la computadora el contenido de los registros intermedios (pipeline registers/latches) que almacenan información entre las distintas etapas del pipeline.
 
 **RF-11**. Consulta de memoria de datos: El sistema deberá permitir obtener y transmitir a la computadora el contenido de las posiciones utilizadas de la memoria de datos.
 
@@ -40,7 +40,7 @@ El procesador deberá admitir la ejecución de instrucciones pertenecientes a lo
 
 **RNF-01**. Interfaz de comunicación: La comunicación entre la computadora y la FPGA deberá realizarse mediante el protocolo UART.
 
-**RNF-02. **Integridad del reloj: El diseño deberá garantizar que la señal de reloj del sistema no sea modificada, interrumpida ni intervenida por los mecanismos de depuración o comunicación.
+**RNF-02.** Integridad del reloj: El diseño deberá garantizar que la señal de reloj del sistema no sea modificada, interrumpida ni intervenida por los mecanismos de depuración o comunicación.
 
 **RNF-03**. Interfaz de usuario: La interacción con el sistema deberá realizarse mediante una interfaz GUI, CLI o TUI.
 
@@ -76,20 +76,6 @@ La convención del código es un módulo por archivo, Verilog-2001, reset síncr
 | RNF-02 Integridad del reloj | Enable global sobre los pines CE en lugar de *gating*; el MMCM solo genera la frecuencia | Modos de operación, Análisis temporal | `cpu_core.v` (`en_int`), `basys3_top.v` |
 | RNF-03 Interfaz de usuario | CLI en Python | Interfaz CLI | `cli.py` |
 
-### Orden recomendado para leer el código
-
-| Paso | Archivo | Qué buscar | Sección del informe |
-| --- | --- | --- | --- |
-| 1 | `basys3_top.v` | MMCM, sincronizador de reset y LEDs: lo único específico de la placa | Análisis temporal |
-| 2 | `system_top.v` | Cómo se conectan `uart`, `debug_unit`, `cpu_core`, `imem` y `dmem`, y el mux del puerto A de la dmem | 1. Arquitectura |
-| 3 | `cpu_core.v` | Leerlo de arriba hacia abajo: los bloques `IF`, `ID`, `EX`, `MEM` y `WB` coinciden con las etapas, y el control viaja empaquetado en un vector por registro | 2. Pipeline |
-| 4 | `fetch_unit.v`, `if_id_reg.v` | Mux de `next_pc` con sus prioridades y el registro IF/ID | 2.1, 3.4 |
-| 5 | `decoder.v`, `imm_gen.v`, `regfile.v` | Decodificación estricta, señales de control y bypass WB→ID | 2.2 |
-| 6 | `hazard_unit.v`, `forward_unit.v`, `branch_unit.v` | Las tres unidades que resuelven los riesgos | 3. Riesgos |
-| 7 | `alu.v`, `store_align.v`, `load_align.v`, `dmem.v`, `ex_mem_reg.v`, `mem_wb_reg.v` | Cálculo, alineación de accesos y registros de las últimas etapas | 2.3 a 2.5 |
-| 8 | `halt_ctrl.v` | Fin de ejecución, motivo de detención y contador de ciclos | Modos de operación |
-| 9 | `debug_unit.v` y `dbg_*.v` | Primero `dbg_ctrl.v` (los estados `S_RUN` y `S_STEP`), luego el parser, el armado de tramas y el volcado | Debug unit |
-| 10 | `uart*.v` | Módulos de TP2 sin cambios | Debug unit |
 
 ## 1. Arquitectura propuesta
 
@@ -184,7 +170,7 @@ flowchart LR
 
 ```
 
-Detalle clave del diagrama: las BRAM se direccionan un ciclo antes de la etapa que consume el dato (sección 4). imem recibe next\_pc y entrega la instrucción alineada con PC durante IF; dmem recibe la dirección calculada en EX y entrega el dato durante MEM. Así los cuatro registros de pipeline son flip-flops explícitos.
+Detalle clave del diagrama: las BRAM se direccionan un ciclo antes de la etapa que consume el dato (secciones 2.1 y 2.4). imem recibe next\_pc y entrega la instrucción alineada con PC durante IF; dmem recibe la dirección calculada en EX y entrega el dato durante MEM. Así los cuatro registros de pipeline son flip-flops explícitos.
 
 ### 1.2 Mapa de memoria
 
@@ -282,6 +268,9 @@ Describimos cuales son las 5 etapas del pipeline implementado:
 
 En `cpu_core.v` las etapas aparecen en este mismo orden, separadas por comentarios, y entre cada par hay un registro de pipeline. El control de cada instrucción viaja empaquetado en un vector (`id_ex_ctrl`, `ex_mem_ctrl`, `mem_wb_ctrl`) con el mismo formato que el volcado de estado, de modo que `dbg_core_vec` es una simple concatenación de esos registros y el formato se define en un solo lugar. Para cada etapa se indica qué módulos la forman.
 
+**Registros de pipeline.** Un registro de pipeline es un conjunto de flip-flops ubicado entre dos etapas: en cada flanco captura lo que calculó la etapa anterior y lo mantiene estable durante el ciclo siguiente, de modo que cada etapa trabaja sobre una instrucción distinta. 
+Se decidió implementarlos como módulos explícitos (`if_id_reg`, `id_ex_reg`, `ex_mem_reg` y `mem_wb_reg`), para que la Debug Unit pueda leerlos y para concentrar en ellos el control del flujo de instrucciones. Todos siguen el mismo patrón, con prioridad `rst` > `en` > `flush` > `hold`. El reset y el flush cargan una burbuja, es decir, una instrucción sin efectos con `valid = 0`. Con `en = 0` o `hold = 1` no se asigna nada y el registro conserva su valor, algo que en la FPGA se implementa con el pin CE del flip-flop. Solo IF/ID tiene `hold`, y solo IF/ID e ID/EX tienen `flush`, porque una instrucción que ya llegó a EX/MEM nunca se cancela. El vector de control se achica de una etapa a la siguiente (31, 13 y 9 bits), ya que cada etapa deja de propagar las señales que ya consumió.
+
 ### 2.1 Instruction Fetch
 
 En la etapa IF se utiliza el valor indicado por el PC para acceder a la memoria de instrucciones y buscar proxíma a ejecutar. Antes de irse, se actualiza el PC a la próxima dirección de instrucción a ejecutar.
@@ -291,6 +280,8 @@ En `cpu_core.v` corresponde al bloque `IF` (instancias `u_fetch` y `u_if_id`). L
 - `fetch_unit`: contiene el PC y el multiplexor de `next_pc`, que elige entre `PC + 4`, el destino de un salto resuelto en EX, el destino de un `jal` resuelto en ID, o mantener el PC (stall, drenaje o pausa), con la prioridad descripta en la sección de riesgos. También marca la instrucción buscada con un `stop_code` cuando el PC sale del programa cargado (OOR) o se alcanzó el límite de ciclos (TIMEOUT).
 - `imem`: memoria de instrucciones, una BRAM inferida de 1024 × 32 bits con lectura síncrona. Se direcciona con `next_pc` para que el dato llegue alineado con el PC durante IF. El puerto de escritura es exclusivo de la Debug Unit.
 - `if_id_reg`: registro IF/ID con `pc`, `instr`, `stop_code` y `valid`. Ante un flush carga una burbuja (una NOP con `valid = 0`) y ante un load-use mantiene su contenido.
+
+**Latencia de la memoria de instrucciones.** Las BRAM de la FPGA tienen lectura síncrona: el dato aparece un flanco después de presentar la dirección. Si la imem se direccionara con el PC, la instrucción llegaría un ciclo atrasada respecto de su PC. Por eso se decidió direccionarla con `next_pc`, la dirección que el PC tomará en el próximo flanco. Así el PC y el registro de salida de la BRAM se actualizan en el mismo flanco con la misma dirección, y durante todo el ciclo `imem_rdata` es la instrucción ubicada en `PC`. Por esta razón `rst` y `!en` también forman parte del multiplexor de `next_pc`: durante un reset, una pausa o un stall, la BRAM lee la dirección que corresponde y la instrucción en IF no se desfasa. El costo es que, ante un salto tomado, el destino calculado en EX debe atravesar el multiplexor y llegar a la dirección de la BRAM en el mismo ciclo, lo que define el camino crítico (sección 9.6).
 
 ### 2.2 Instruction Decode (ID)
 
@@ -372,6 +363,8 @@ En `cpu_core.v` corresponde al bloque `MEM` (instancias `u_ld` y `u_mem_wb`); la
 - Multiplexor de `wb_data`: elige entre el dato cargado (loads) y el resultado de EX.
 - `mem_wb_reg`: registro MEM/WB con `pc`, el dato a escribir y el control.
 
+**Latencia de la memoria de datos.** Se aplicó el mismo criterio que en la imem: la dirección se calcula en EX y se presenta a la dmem en ese mismo ciclo. De esta forma el store se escribe en el flanco EX→MEM y el dato de un load queda disponible durante MEM, sin agregar ciclos. Las escrituras parciales (`sb`, `sh`) usan *byte enables*: `store_align` replica el dato en los carriles de bytes y activa solo los que corresponden según `addr[1:0]`. En la lectura, `load_align` extrae el byte o la media palabra y la extiende con signo o con ceros. El enable `a_en = en_int` congela tanto la escritura como el registro de salida, así que durante una pausa el dato de un load que está en MEM no cambia.
+
 ### 2.5 Write Back (WB)
 
 Se escribe el resultado en los registros corresponeidnte, tomando el valor segun la isntruccion que se ejcuto. Esto es controlado por un multiplexor que selecciona que valor va a ser el almacenado en el registro de destino. Se realiza trabajo en esta etapa solametne para instrucciones R o L, las demas es un ciclo sin trabajo.
@@ -393,14 +386,15 @@ Para evitar que se utilice un dato desactualizado, se realiza un cortocircuito r
 
 La unidad de forwarding compara los registros fuente (`rs1` y `rs2`) de la instrucción que se encuentra en EX con los registros destino (`rd`) de las instrucciones que están en las etapas posteriores. Si detecta una dependencia, selecciona el dato más reciente disponible, siguiendo este orden de prioridad:
 
-- **EX/MEM:** si hay una instrucción en EX cuyo registro fuente es el destino de una instrucción en MEM, se utiliza el resultado almacenado en `ex_mem.result`. Ademas se verifica con `ex_mem.rd` que no sea una instruccion de carga, ya que el dato todavía no está disponible en esta etapa.\
- (`ex_mem.result`) si `ex_mem.reg_write && ex_mem.rd != 0 && ex_mem.rd == id_ex.rsX && !ex_mem.mem_read`;
+- **EX/MEM:** si hay una instrucción en EX cuyo registro fuente es el destino de una instrucción en MEM, se utiliza el resultado almacenado en `ex_mem.result`. Se excluyen las cargas, porque en esa etapa `ex_mem.result` contiene la dirección y no el dato: `ex_mem.reg_write && ex_mem.rd != 0 && ex_mem.rd == id_ex.rsX && !ex_mem.mem_read`;
 - **MEM/WB**: si no existe una coincidencia válida en EX/MEM, se verifica si la instrucción en WB escribe el registro que necesita la instrucción actual. En ese caso, se utiliza el dato  (`mem_wb.wb_data`) si `mem_wb.reg_write && mem_wb.rd != 0 && mem_wb.rd == id_ex.rsX`;
 - **Banco de registros:** si no detecta dependencias se utiliza el valor leído en ID  (`id_ex.rsX_data`).
 
 La prioridad es importante porque, si varias instrucciones anteriores modificaron el mismo registro, debe utilizarse el resultado de la más reciente. El valor de `rs2` obtenido mediante este mecanismo también se utiliza como dato para las instrucciones de almacenamiento (*store*) y como entrada del comparador de saltos.
 
 Por otra parte, para resolver las dependencias entre una escritura en WB y una lectura en ID que ocurren durante el mismo ciclo, el banco de registros incorpora un **bypass interno**. Si el registro que se está escribiendo coincide con alguno de los que se intenta leer, se devuelve directamente el nuevo dato en lugar del valor anterior almacenado.
+
+Con estos mecanismos quedan cubiertas todas las distancias entre la instrucción que produce un dato y la que lo usa. A distancia 1 el dato se toma de EX/MEM, a distancia 2 de MEM/WB, a distancia 3 del *bypass* del banco, y a partir de 4 ya está escrito en el banco. Para evitar adelantamientos falsos, el decoder entrega como `rs1` y `rs2` solo los registros que la instrucción realmente lee y pone en 0 los demás. Por ejemplo, en `lui` los bits 19:15 pertenecen al inmediato; con `rs1 = 0`, la ALU calcula `0 + imm` aunque ese campo coincida con un `rd` anterior.
 
 **Código:** `forward_unit.v` genera `fwd_a` y `fwd_b`; los multiplexores de operandos (`ex_op_a`, `ex_op_b`) están en `cpu_core.v`; el *bypass* WB→ID está en `regfile.v` (`bypass1`, `bypass2`).
 
@@ -414,15 +408,19 @@ La unidad **Hazard** detecta estos casos durante la etapa ID, mediante la siguie
 
 Cuando se detecta el riesgo, se congela el PC y el registro IF/ID, para que la misma instruccion permanezca en ID hasta el ciclo siguiente. Al mismo tiempo, se insertan señales de control en cero en ID/EX, generando una burbuja que evita que esa etapa avance o realice alguna operación. De esta manera, la instrucción load puede continuar avanzando por el pipeline y, un ciclo después, cuando se encuentra en WB, el dato ya está disponible para ser enviado mediante forwarding desde MEM/WB hacia EX.
 
+El stall se diferencia de la pausa del modo paso a paso por su alcance. El stall congela solo el PC e IF/ID y deja avanzar al resto del pipeline, porque el load tiene que llegar a MEM para que el riesgo se resuelva. La pausa (`en = 0`), en cambio, congela todo el procesador. La detección es conservadora: un store que guarda el valor recién cargado (`lw x5` seguido de `sw x5`) también genera el stall, aunque el dato recién se necesite en MEM, porque no se implementó adelantamiento de MEM a MEM.
+
 **Código:** `hazard_unit.v` solo genera `load_use`; sus efectos se ven en `if_id_reg.v` (`hold`), en `id_ex_reg.v` (`flush`, burbuja) y en `fetch_unit.v` (`next_pc = pc`).
 
 ### 3.3 Riesgo de control
 
 Un **riesgo de control** aparece cuando una instrucción puede alterar el flujo secuencial de ejecución (saltos condicionales e incondicionales) y el procesador debe decidir qué instrucción buscar antes de conocer el resultado del salto: si se toma y cuál es su destino. Como el pipeline ya cargó las instrucciones siguientes, si la decisión fue errónea esas instrucciones no deben completarse y se descartan convirtiéndolas en burbujas (*flush*), lo que se traduce en ciclos perdidos, la penalidad del salto.
 
-Para evitar estos riesgos, se decidió utilizar una predicción estática de salto no tomado. Se asume que cada instrucción de salto, el resultado es "no saltar" y se continúa utilizando el PC secuencial (PC + 4). Si una instrucción `b``e``q``,`` ``bn``e``  y `` ``j``a``l``r` al resolverse en EX y el salto sí se toma, se vacía la etapa IF/ID e ID/EX siendo penalizados por dos ciclos. Por otro lado, `j``al` se resuelve en ID por lo que si la predicción es erronea, solo tenemos un ciclo de penalidad.
+Para evitar estos riesgos, se decidió utilizar una predicción estática de salto no tomado: se asume que ningún salto se toma y se continúa buscando en el PC secuencial (`PC + 4`). Si un `beq`, `bne` o `jalr` se resuelve en EX y el salto se toma, se vacían IF/ID e ID/EX, con una penalidad de dos ciclos. El `jal`, en cambio, se resuelve en ID y, como siempre salta, siempre paga un ciclo.
 
-Se utilizó un comparador de condiciones del `b``r``a``nch``_``u``n``it` dedicado diferente a la ALU que ejecuta la instrucción.  Este opera sobre los operandos ya forwardeados para que no ocurran riesgos de datos.
+La etapa de resolución se eligió según lo que necesita cada instrucción. El `jal` solo necesita `pc + imm`, que está disponible en ID y no depende de ningún registro, por lo que adelantarlo no introduce riesgos de datos y ahorra un ciclo. Resolver `beq` y `bne` en ID también ahorraría un ciclo, pero exigiría agregar forwarding hacia ID y un stall adicional cuando el salto depende de la instrucción inmediatamente anterior, además de poner el comparador en serie con la lectura del banco. Resolverlos en EX reutiliza el forwarding existente y no agrega stalls, a costa de un ciclo más de penalidad en los saltos tomados.
+
+Se utilizó un comparador de igualdad dedicado en `branch_unit`, separado de la ALU, que opera en paralelo con ella sobre los operandos ya forwardeados, para que no ocurran riesgos de datos.
 
 La dirección de destino se calcula con un sumador independiente de la ALU que permite calcular el nuevo PC en la etapa EX, tomando los valores del registro ID/EX para sumar`id_ex.pc + id_ex.imm` fuera del camino crítico. Para `jalr`, en cambio, se aprovecha el resultado de la ALU, que ya calcula `rs1 + imm`, y se obtiene la dirección de destino aplicando `(alu_result) & ~1`, lo que garantiza que el bit menos significativo sea cero.
 
@@ -467,14 +465,14 @@ Con esta organización, las distintas etapas disponen de recursos independientes
 
 4. ## Debug unit
 
-Se pide una unidad de depuración conectada al procesador para facilitar su programación, depuración y ejecución. Es una máquina de estados que recibe comandos por UART y controla al core solo a través de dos señales (`core_rst` y `core_en`), de modo que el procesador no necesita saber que existe.&#32;
+Se pide una unidad de depuración conectada al procesador para facilitar su programación, depuración y ejecución. Es una máquina de estados que recibe comandos por UART y controla al core solo a través de dos señales (`core_rst` y `core_en`), más el largo del programa (`imem_limit`), de modo que el procesador no necesita saber que existe. El resto de la conexión es de solo lectura: un puerto de debug del banco de registros, el puerto B de la dmem y el vector `dbg_core_vec`. Las dos únicas escrituras que hace la Debug Unit, la carga de la imem y el borrado de la dmem, ocurren con el core en reset, por lo que la depuración nunca compite con el pipeline por un recurso.
 
-**Código:** `debug_unit.v` es el tope que instancia los cuatro submódulos; conviene leer primero `dbg_ctrl.v`. Está formada por:
+Se dividió en cuatro módulos con una sola responsabilidad cada uno: el parser no conoce el significado de los comandos, el control no conoce el formato de las tramas y el armado de la respuesta no conoce su contenido. Esto permitió probar cada módulo con su propio testbench. **Código:** `debug_unit.v` es el tope que instancia los cuatro submódulos; conviene leer primero `dbg_ctrl.v`. Está formada por:
 
-- **dbg\_rx\_frame**: parser de tramas; busca el inicio de trama, lee el encabezado, entrega el payload byte a byte y verifica el checksum. Descarta la trama si pasan 10 ms sin recibir un byte o si hay error de *framing*.
-- **dbg\_tx\_frame**: arma las tramas de respuesta y las envía por el transmisor UART.
-- **dbg\_state\_src**: traduce un índice de byte al byte correspondiente del volcado de estado (registros, pipeline y memoria de datos).
-- **dbg\_ctrl**: máquina de estados que interpreta los comandos y controla al procesador.
+- **dbg\_rx\_frame**: máquina de estados que recorre la trama byte por byte (inicio, comando, largo, payload y checksum), acumula la suma de verificación y avisa a `dbg_ctrl` mediante pulsos de un ciclo. El encabezado se informa antes del payload para que el LOAD pueda escribir la imem a medida que llegan los bytes, sin un buffer para el programa completo. Si pasan 10 ms sin recibir un byte en medio de una trama, o llega un byte con error de *framing*, la descarta y vuelve a buscar el inicio, de modo que un byte perdido no deja al parser bloqueado.
+- **dbg\_ctrl**: máquina de estados que interpreta los comandos. Antes de ejecutar valida, en orden, el checksum, el comando, el largo y el estado (programa cargado y core no detenido); una trama errónea nunca mueve al core y solo genera una respuesta de error. LOAD mantiene el core en reset mientras llega el programa y arma cada palabra de 32 bits a partir de cuatro bytes *little-endian*. LOAD, RESET y el reset de la placa terminan con una secuencia de reinicio que borra la dmem palabra por palabra y suelta el reset del core dos ciclos después; la respuesta se envía al final, cuando el core ya está listo. RUN y STEP se describen en Modos de operación.
+- **dbg\_tx\_frame**: arma la trama de respuesta a partir del código y el largo que indica `dbg_ctrl`. Envía el inicio, el encabezado y el payload, que pide byte a byte a `dbg_state_src`, y calcula el checksum mientras transmite. Para cada byte espera que el transmisor UART esté libre, lo inicia, y espera que `tx_busy` suba y vuelva a bajar antes de continuar.
+- **dbg\_state\_src**: traduce un índice de byte al dato correspondiente del volcado. Según el rango, lo toma del bloque de estado, de `dbg_core_vec`, del puerto de debug del banco de registros o del puerto B de la dmem. Responde con una latencia fija de tres ciclos, impuesta por la lectura síncrona de la BRAM. Como el core está congelado durante todo el envío, el volcado es una foto consistente de un único ciclo.
 
 La comunicación usa los módulos UART del TP2 sin cambios, a 115200 baudios, 8N1. Se eligió esa velocidad porque con el divisor entero el error de baudios es de solo +0,47 %, muy por debajo del \~2 % tolerable; las tramas son cortas, así que una velocidad mayor no mejoraría de forma apreciable la experiencia de uso.
 
@@ -513,9 +511,11 @@ En un pipeline el estado de cada etapa vive en su registro de pipeline (más el 
 
 1. **Todo el estado está bajo el mismo enable.** Con `en_int = 0`, el PC, IF/ID, ID/EX, EX/MEM y MEM/WB conservan su valor (`else if (en_int)`), el banco de registros no escribe (`we = en_int & reg_write`), la dmem no escribe (`we = en_int & mem_write`) y `halt_ctrl` no cambia ni cuenta ciclos. No hay ningún registro del core fuera de ese enable, por lo que ninguna instrucción avanza de etapa ni produce efectos.
 2. **Las memorias también conservan su salida.** Las BRAM tienen lectura síncrona, así que son estado oculto del pipeline. En la imem, con `en_int = 0` se cumple `next_pc = PC`, por lo que la BRAM relee la misma palabra y la instrucción en IF no cambia. En la dmem, el enable `a_en` impide tanto la escritura como la actualización de `a_rdata`, de modo que el dato de un load que está en MEM se mantiene.
-3. **Cada STEP habilita exactamente un flanco.** Al recibir el comando, `dbg_ctrl` activa `step_pulse`, que por construcción dura un solo ciclo (se pone en 0 por defecto en cada ciclo y solo el comando STEP lo sube). El core toma un único flanco habilitado y vuelve a congelarse, y recién entonces se arma y se envía el volcado.
+3. **Cada STEP habilita exactamente un flanco.** Al recibir el comando, `dbg_ctrl` activa `step_pulse`, que por construcción dura un solo ciclo: se pone en 0 por defecto en cada ciclo y solo se sube en el ciclo en que se acepta un STEP, que a la vez lleva la FSM al estado `S_STEP`, por lo que no puede repetirse en el ciclo siguiente. El core toma un único flanco habilitado y vuelve a congelarse, y recién entonces se arma y se envía el volcado.
 
 Como el estado queda quieto, el volcado enviado refleja exactamente lo que hay en cada etapa en ese ciclo, sin que el pipeline siga avanzando mientras se transmite por la UART, que tarda unos 19 ms (millones de ciclos de reloj). Las señales combinacionales (forwarding, load-use, flush) siguen evaluando los mismos valores mientras está congelado, y son las que el host reconstruye para anticipar qué hará el próximo ciclo. Un RESET o un LOAD en medio de la ejecución también vacían el pipeline, para que ninguna instrucción del programa anterior continúe.
+
+Cabe aclarar que, como pide la consigna, un paso equivale a un ciclo de reloj y no a una instrucción completa: en cada flanco habilitado todas las instrucciones presentes en el pipeline avanzan una etapa, y una instrucción necesita cinco pasos para recorrer de IF a WB. Por la misma razón, `flush` y `hold` se evalúan dentro de la condición de enable de cada registro: aunque `ex_redirect` o `load_use` valgan 1 durante una pausa, su efecto se aplica recién en el siguiente flanco habilitado, igual que en ejecución continua.
 
 ### 6.2 Fin de ejecución en ambos modos
 
