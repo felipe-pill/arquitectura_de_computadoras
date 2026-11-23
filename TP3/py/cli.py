@@ -3,7 +3,7 @@
     python TP3/py/cli.py --port COM3
     python TP3/py/cli.py --port COM3 -c "load TP3/asm/loop.s" -c run -c check
 
-Commands: load <file>, step [n], run, reset, dump, mem, pipe [on|off], check,
+Commands: load <file>, step [n], run, reset, dump, mem, pipe [on|off],
 help, quit.
 After each command it shows the processor state:
 - status line (cycles, halted / halt reason, program size);
@@ -15,7 +15,6 @@ After each command it shows the processor state:
   screen.
 `pipe` shows every field of the PC (with next_pc) and of the four pipeline
 registers; `pipe on` adds that to every screen.
-`check` compares the final state with the reference ISS (iss.py).
 """
 
 import argparse
