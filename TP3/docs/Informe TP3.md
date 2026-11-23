@@ -1,5 +1,8 @@
 # TP3 Arquitectura de computadoras
 
+Nou, Sol Agustina - sol.nou@mi.unc.edu.ar
+Pillichody, Felipe - felipe.pillichody@mi.unc.edu.ar
+
 ## Objetivos
 
 El sistema deberá implementar y permitir la interacción con un procesador RISC-V segmentado mediante un pipeline de cinco etapas. Para ello, deberá incorporar una unidad de depuración (Debug Unit) que permita controlar la ejecución del procesador e intercambiar información con una computadora mediante comunicación UART.
