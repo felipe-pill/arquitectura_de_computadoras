@@ -1,7 +1,8 @@
 # TP3 Arquitectura de computadoras
 
-Nou, Sol Agustina - sol.nou@mi.unc.edu.ar
-Pillichody, Felipe - felipe.pillichody@mi.unc.edu.ar
+- Nou, Sol Agustina - sol.nou@mi.unc.edu.ar
+
+- Pillichody, Felipe - felipe.pillichody@mi.unc.edu.ar
 
 ## Objetivos
 
